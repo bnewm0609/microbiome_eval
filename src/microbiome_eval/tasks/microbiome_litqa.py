@@ -60,7 +60,8 @@ Additional notes:
 - Most papers will have 1-2 main research questions.
 - Your answer should be based solely on the abstract provided.
 - Each question must be **independent**.
-- Questions are going to be asked without providing the original abstract, so
+- Do not compose two questions into a single one - your question should not include the word "and". If there are multiple questions, list them separately.
+- Questions are going to be asked without providing the original title or abstract, so
     - make sure all necessary context is included in both the questions and the answers.
     - Do not refer to "the paper", "the authors", "this study", etc. in your question or answer. Instead, rephrase to be self-contained.
 
@@ -81,6 +82,7 @@ Identify the main research question(s) that the paper is trying to answer along 
             prompts_batched.append([{"role": "user", "content": prompt}])
         
         responses = llm.batch_call(prompts_batched, max_workers=10, **generation_kwargs)
+        # breakpoint()
         outputs = []
         for response in responses:
             response_content = response["content"].strip()
@@ -125,11 +127,20 @@ Identify the main research question(s) that the paper is trying to answer along 
                 }
                 outputs.append(qa_pair_dict)
             
-            with open(cache_path, "w") as f:
-                for qa_pair in outputs:
-                    f.write(json.dumps(qa_pair) + "\n")
+        with open(cache_path, "w") as f:
+            for qa_pair in outputs:
+                f.write(json.dumps(qa_pair) + "\n")
             
-            return outputs
+        
+        # choose some representative samples to inspect the quality of the generated QA pairs before moving on to the next step:
+        print("Sample generated QA pairs:")
+        random.seed(42)
+        for sample in random.sample(outputs, min(5, len(outputs))):
+            print(f"Question ID: {sample['question_id']}")
+            print(f"Question: {sample['question']}")
+            print(f"Answer: {sample['answer']}")
+            print("-" * 80)
+        return outputs
 
     def gen_distractors(self, qa_pairs, llm, cache_path, generation_kwargs):
         if cache_path.exists():
@@ -239,7 +250,7 @@ Respond with a JSON array of exactly 4 distractor strings:
                 step_inputs = [json.loads(line) for line in f]
         else:
             with open("data/gmrepo/papers/s2_paper_info.jsonl", "r") as f:
-                step_inputs = [json.loads(line) for line in f]
+                step_inputs = [json.loads(line) for line in f]# [:10]
 
         steps = list(self.steps.items())
         start_idx = next(i for i, (s, _) in enumerate(steps) if s == args.start_step)
