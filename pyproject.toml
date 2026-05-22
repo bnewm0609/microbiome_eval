@@ -1,5 +1,9 @@
+[build-system]
+requires = ["setuptools >= 77.0.3"]
+build-backend = "setuptools.build_meta"
+
 [project]
-name = "microbiome"
+name = "microbiome-eval"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
@@ -10,5 +14,10 @@ dependencies = [
     "matplotlib",
     "tqdm",
     "requests>=2.34.2",
-    "huggingface_hub"
+    "huggingface_hub",
+    "openai>=2.37.0",
+    "datasets>=4.8.5",
 ]
+
+[tool.setuptools.packages.find]
+where = ["src"]

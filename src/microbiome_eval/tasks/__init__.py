@@ -4,10 +4,10 @@ def load_task(task_name):
     """
     if task_name == "disease_classification":
         from microbiome_eval.tasks.disease_clf import DiseaseClassificationTask
-        return DiseaseClassification
-    elif task_name == "microbiome_mcqa":
-        from microbiome_eval.tasks.microbiome_mcqa import MicrobiomeMCQATask
-        return MicrobiomeMCQATask
+        return DiseaseClassificationTask
+    elif task_name == "microbiome_reasoning":
+        from microbiome_eval.tasks.microbiome_reasoning import MicrobiomeReasoningTask
+        return MicrobiomeReasoningTask
     elif task_name == "microbiome_litqa":
         from microbiome_eval.tasks.microbiome_litqa import MicrobiomeLitQATask
         return MicrobiomeLitQATask

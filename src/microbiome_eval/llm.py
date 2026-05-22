@@ -1,11 +1,32 @@
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 import time
 import json
 
+
 import openai
 import requests
+from tqdm import tqdm
 
 from microbiome_eval.cache import LLMCache
+
+VLLM_EXTRA_PARAMETERS = {
+    "use_beam_search",
+    "top_k",
+    "min_p",
+    "repetition_penalty",
+    "length_penalty",
+    "stop_token_ids",
+    "include_stop_str_in_output",
+    "ignore_eos",
+    "min_tokens",
+    "skip_special_tokens",
+    "spaces_between_special_tokens",
+    "truncate_prompt_tokens",
+    "allowed_token_ids",
+    "prompt_logprobs",
+    "chat_template_kwargs",
+}
 
 def wait_for_vllm(hostname: str, port: int, timeout: int = 1200):
     start = time.time()
@@ -20,13 +41,14 @@ def wait_for_vllm(hostname: str, port: int, timeout: int = 1200):
     raise TimeoutError("vLLM server did not become ready")
 
 class LLM:
-    def __init__(self, model_name: str, use_cache: bool = True):
+    def __init__(self, model_name: str, use_cache: bool = True, debug: bool = False):
         if use_cache:
             self.cache = LLMCache(cache_dir=str(Path(__file__).parent.parent.parent / ".llm_cache"), enabled=True)
         else:
             self.cache = None
 
         self.model_name = model_name
+        self.debug = debug
 
         # This junk is to make sure we can connect to the llm as a judge server if the model is a local model.
         if not model_name.startswith("gpt-"):
@@ -84,6 +106,7 @@ class LLM:
                         extra_body=extra_body_params,
                         **params,
                     )
+                    return response.model_dump()
                 else:
                     response = self.client.chat.completions.create(
                         model=self.model_name,
@@ -92,16 +115,35 @@ class LLM:
                         **params,
                     )
 
-                # check if we're we're in non-thinking mode but the content is none bc the reasoning parser is stupid.
-                # It sometimes parses content into reasoning_content
-                response_dict = response.model_dump()['choices'][0]['message']
-                if not response_dict["content"] and ((not generation_kwargs.get("chat_template_kwargs", {}).get("enable_thinking", False)) or ("Thinking" not in self.model_name)):
-                    response_dict["content"] = response_dict.get("reasoning_content", "")
-                    response_dict["reasoning_content"] = None
-                return response_dict
+                    # check if we're we're in non-thinking mode but the content is none bc the reasoning parser is stupid.
+                    # It sometimes parses content into reasoning_content
+                    response_dict = response.model_dump()['choices'][0]['message']
+                    if not response_dict["content"] and ((not generation_kwargs.get("chat_template_kwargs", {}).get("enable_thinking", False)) or ("Thinking" not in self.model_name)):
+                        response_dict["content"] = response_dict.get("reasoning_content", "")
+                        response_dict["reasoning_content"] = None
+                    return response_dict
                 
             except Exception as e:
                 print(f"Error during LLM call (attempt {attempt+1}/3): {e}")
                 time.sleep(5)  # wait a bit before retrying
         
         raise RuntimeError("LLM call failed after 3 attempts")
+
+    def batch_call(self, batch_messages, max_workers=5, **generation_kwargs):
+        results = []
+        if self.debug:
+            for prompt in batch_messages:
+                run_output = self.call(prompt, **generation_kwargs)
+                print(run_output["content"])
+                results.append(run_output)
+        else:
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                futures = [executor.submit(self.call, prompt, **generation_kwargs) for prompt in batch_messages]
+                for future in tqdm(as_completed(futures), total=len(futures)):
+                    try:
+                        result = future.result()
+                    except Exception as e:
+                        print(f"Worker failed with exception: {e}")
+                        continue
+                    results.append(result)
+        return results

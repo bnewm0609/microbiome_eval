@@ -2,7 +2,7 @@ from pathlib import Path
 import json
 from typing import Any
 
-from microbiome_eval.tasks.base import BaseTask
+from microbiome_eval.tasks.base import BaseTask, PROJ_PATH
 
 
 
@@ -13,7 +13,7 @@ class MedQATask(BaseTask):
 
     @staticmethod
     def add_arguments(parser):
-        parser.add_argument("--split", default="dev", options=["dev", "test"], help="Which split of the dataset to use.")
+        parser.add_argument("--split", default="dev", choices=["dev", "test"], help="Which split of the dataset to use.")
 
     
     def get_prompts(self):
@@ -39,8 +39,8 @@ class MedQATask(BaseTask):
 
         # load the dataset
         split = self.config["split"]
-        with open(PROJ_PATH / f"data/med_qa/US/{split}.json") as f:
-            dataset = json.load(f)
+        with open(PROJ_PATH / f"data/med_qa/questions/US/{split}.jsonl") as f:
+            dataset = [json.loads(line) for line in f]
         
         # shuffle the dataset if seed is set
         if self.config["seed"] is not None:
@@ -64,6 +64,7 @@ class MedQATask(BaseTask):
             prompts.append(sample
             | {
                 "prompt": prompt,
+                "system_message": system_message,
                 # Any system prompt can be included here
             })
         

@@ -11,3 +11,6 @@ wheels/
 
 # other
 data/
+.llm_cache/
+results/
+vllm_servers
