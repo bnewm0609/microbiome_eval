@@ -43,6 +43,17 @@ def main():
     parser.add_argument("command", help="The full 'vllm serve ...' command to run")
     args = parser.parse_args()
 
+    # If we're not in an apptainer container with the correct conda environment, re-launch this script inside one with the command to start the vLLM server as an argument. The "launch_vllm_server.sh" script will handle starting the server and then re-launching this script inside the container with the correct environment variables set to connect to the server.
+    in_apptainer = bool(os.environ.get("APPTAINER_CONTAINER") or os.environ.get("SINGULARITY_CONTAINER"))
+    conda_env = os.environ.get("CONDA_DEFAULT_ENV", "")
+    in_correct_conda = conda_env in ("nvcc129", "nvcc130")
+
+    if not (in_apptainer and in_correct_conda):
+        script = Path(__file__).parent / "launch_vllm_server.sh"
+        python_cmd = " ".join(shlex.quote(arg) for arg in [sys.executable] + sys.argv)
+        os.execvp("/bin/bash", ["/bin/bash", str(script), python_cmd])
+        return
+
     model = parse_model_from_command(args.command)
     port = get_next_port()
 
