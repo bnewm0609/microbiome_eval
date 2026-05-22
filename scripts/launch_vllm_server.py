@@ -1,0 +1,108 @@
+import argparse
+import glob
+import json
+import os
+import shlex
+import signal
+import socket
+import subprocess
+import sys
+from pathlib import Path
+
+VLLM_SERVERS_DIR = Path(__file__).parent.parent / "vllm_servers"
+DEFAULT_PORT = 37140
+
+
+def get_next_port() -> int:
+    json_files = glob.glob(str(VLLM_SERVERS_DIR / "*.json"))
+    if not json_files:
+        return DEFAULT_PORT
+    max_port = DEFAULT_PORT - 1
+    for f in json_files:
+        with open(f) as fh:
+            data = json.load(fh)
+        max_port = max(max_port, data["port"])
+    return max_port + 1
+
+
+def parse_model_from_command(command: str) -> str:
+    tokens = shlex.split(command)
+    try:
+        serve_idx = tokens.index("serve")
+    except ValueError:
+        print("Error: command must contain 'serve'", file=sys.stderr)
+        sys.exit(1)
+    if serve_idx + 1 >= len(tokens):
+        print("Error: no model argument after 'serve'", file=sys.stderr)
+        sys.exit(1)
+    return tokens[serve_idx + 1]
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("command", help="The full 'vllm serve ...' command to run")
+    args = parser.parse_args()
+
+    model = parse_model_from_command(args.command)
+    port = get_next_port()
+
+    VLLM_SERVERS_DIR.mkdir(parents=True, exist_ok=True)
+    server_file = VLLM_SERVERS_DIR / f"{model.replace('/', '_')}.json"
+    with open(server_file, "w") as fh:
+        json.dump({"hostname": socket.gethostname(), "port": port}, fh, indent=2)
+
+    tokens = shlex.split(args.command)
+    if "--port" not in tokens:
+        tokens += ["--port", str(port)]
+    else:
+        port_idx = tokens.index("--port")
+        tokens[port_idx + 1] = str(port)
+
+    def cleanup(signum=None, frame=None):
+        server_file.unlink(missing_ok=True)
+        if proc is not None:
+            proc.terminate()
+        sys.exit(0)
+
+    proc = None
+    for sig in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
+        signal.signal(sig, cleanup)
+
+    # set the hf_token env variable for the subprocess
+    env = os.environ.copy()
+    env["HF_TOKEN"] = open(f"{os.path.expanduser('~')}/.hf_token_fs").read().strip()
+
+    print(f"Launching '{model}' on {socket.gethostname()}:{port}", flush=True)
+
+    proc = subprocess.Popen(
+        tokens,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        env=env,
+    )
+
+    import select
+
+    streams = {proc.stdout: sys.stdout, proc.stderr: sys.stderr}
+    open_streams = set(streams)
+    try:
+        while open_streams:
+            readable, _, _ = select.select(list(open_streams), [], [])
+            for stream in readable:
+                line = stream.readline()
+                if line:
+                    streams[stream].write(line)
+                    streams[stream].flush()
+                else:
+                    open_streams.discard(stream)
+    finally:
+        server_file.unlink(missing_ok=True)
+
+    proc.wait()
+    sys.exit(proc.returncode)
+
+
+if __name__ == "__main__":
+    main()
+

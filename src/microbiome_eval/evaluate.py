@@ -9,8 +9,6 @@ Main differences from `evaluate.py`:
 
 """
 from argparse import ArgumentParser
-from argparse import ArgumentParser
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from tqdm import tqdm
 import json
 from pathlib import Path
@@ -37,33 +35,34 @@ def compress_generation_kwargs(kwargs: dict) -> str:
     return "-".join(parts)
 
 
-def run(model, prompt, config):
-    generation_kwargs = json.loads(generation_kwargs) if generation_kwargs else {}  # No explicit defaults
-    if not generation_kwargs:
-        print("No generation kwargs provided, using defaults.")
+# def run(model, prompt, config):
+#     generation_kwargs = config.get("generation_kwargs", "{}")
+#     generation_kwargs = json.loads(generation_kwargs)  # No explicit defaults
+#     if not generation_kwargs:
+#         print("No generation kwargs provided, using defaults.")
     
-    messages = []
-    if prompt.get("system_message"):
-        messages.append({"role": "system", "content": prompt["system_message"]})
-    messages.append({"role": "user", "content": prompt["prompt"]})
-    response = model.call(prompt["messages"], **generation_kwargs)
-    messages.append({"role": "assistant"} | response)
-    response = response["content"]
+#     messages = []
+#     if prompt.get("system_message"):
+#         messages.append({"role": "system", "content": prompt["system_message"]})
+#     messages.append({"role": "user", "content": prompt["prompt"]})
+#     response = model.call(messages, **generation_kwargs)
+#     messages.append({"role": "assistant"} | response)
+#     response = response["content"]
 
-    return {
-        "response": response,
-        **prompt,
-        "messages": messages,
-    }
+#     return {
+#         "response": response,
+#         **prompt,
+#         "messages": messages,
+#     }
 
 
 def main():
     parser = ArgumentParser()
-    parser.add_argument("--task", help="Name of the task to run", choices=["disease_classification", "microbiome_mcqa", "microbiome_litqa", "med_qa"])
+    parser.add_argument("--task", help="Name of the task to run", choices=["disease_classification", "microbiome_reasoning", "microbiome_litqa", "med_qa"])
     parser.add_argument("--model", help="Name of the model to evaluate")
     parser.add_argument("--generation_kwargs", help="Generation kwargs to use for the model calls, e.g. --generation_kwargs '{\"temperature\": 0.7, \"max_tokens\": 512}'", default=None)
     parser.add_argument("--start", type=int, default=0, help="Which example index to start running at (useful when parallelizing synthetic data generation",)
-    parser.add_argument("--limit", default=None, help="Limit number of tasks to run for debugging, e.g. --limit 5 or only consider a specific set of ex_nums e.g. --limit \"[1,5,7]\"")
+    parser.add_argument("--limit", type=int, default=None, help="Limit number of tasks to run for debugging, e.g. --limit 5")
     parser.add_argument("--out_dir", default="./dag_agent_outputs")
     parser.add_argument("--max_workers", type=int, default=5, help="Max parallel workers for number of simultaneous agent calls (default: 5)")
     parser.add_argument("--seed", default=None, help="Random seed for reproducibility. If not set, data will not be shuffled.")
@@ -82,35 +81,38 @@ def main():
     config = vars(args)
     task = task_cls(config)
 
-    model = LLM(args.model, use_cache=False)
+    model = LLM(args.model, use_cache=False, debug=args.debug)
 
+    # form the output directory name based on the config  
+    generation_kwargs = json.loads(config.get("generation_kwargs", "{}"))  # No explicit defaults
+    gkw_suffix = f"_gkw_{compress_generation_kwargs(generation_kwargs)}" if generation_kwargs else ""
     out_dir = Path(args.out_dir) / f"{args.task}_{args.model.replace('/', '_')}_{args.limit if args.limit is not None else 'all'}_sd{args.seed}{gkw_suffix}"
-    Path(args.out_dir).mkdir(parents=True, exist_ok=True)
-    out_dir = Path(args.out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    print(f"Saving outputs to: {out_dir}")
+
     with open(out_dir / "config.json", "w") as f:
         json.dump(config | config, f)
 
 
     prompts = task.get_prompts()
 
-    generations = []
+    # create prompts
+    messages_batched = []
+    for prompt in prompts:
+        messages = []
+        if prompt.get("system_message"):
+            messages.append({"role": "system", "content": prompt["system_message"]})
+        messages.append({"role": "user", "content": prompt["prompt"]})
+        messages_batched.append(messages)
 
-    if args.debug:
-        for prompt in prompts:
-            run_output = agent.run(prompt)
-            print(run_output["response"])
-            generations.append(run_output)
-    else:
-        with ThreadPoolExecutor(max_workers=args.max_workers) as executor:
-            futures = [executor.submit(run, prompt, config) for prompt in prompts]
-            for future in tqdm(as_completed(futures), total=len(futures)):
-                try:
-                    result = future.result()
-                except Exception as e:
-                    print(f"Worker failed with exception: {e}")
-                    continue
-                print(result["response"])
-                generations.append(result)
+    responses = model.batch_call(messages_batched, max_workers=args.max_workers, **generation_kwargs)
+    generations = []
+    for prompt, messages, response in zip(prompts, messages_batched, responses):
+        generations.append({
+            "response": response["content"],
+            **prompt,
+            "messages": messages + [{"role": "assistant"} | response],
+        })
 
     generations_file = out_dir / "generations.jsonl"
     with open(generations_file, "w") as f:
@@ -125,8 +127,6 @@ def main():
         with open(generations_file) as f:
             for line in f:
                 result = json.loads(line)
-                result["metadata"] = {"question": result["question"]}
-                result["raw_response"] = json.dumps(result["messages"])
                 results.append(result)
 
         if results:
@@ -140,7 +140,7 @@ def main():
             with open(out_dir / "summary_metrics.json", "w") as f:
                 json.dump(summary_metrics, f)
 
-            print(f'\nMetric results saved to: {metrics_file}')
+            print(f'Metric results saved to: {metrics_file}')
     else:
         print(f'Metric results already exist at: {metrics_file}, skipping evaluation.')
 

@@ -1,4 +1,5 @@
-PROJ_PATH = Path(__file__).parent.parent.parent
+from pathlib import Path
+PROJ_PATH = Path(__file__).parent.parent.parent.parent
 
 class BaseTask:
     def __init__(self, config):
@@ -11,5 +12,5 @@ class BaseTask:
     def get_prompts(self):
         raise NotImplementedError
 
-    def evaluate_results(self, results):
+    def evaluate_responses(self, results):
         raise NotImplementedError
