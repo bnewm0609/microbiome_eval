@@ -14,3 +14,4 @@ data/
 .llm_cache/
 results/
 vllm_servers
+*.out

@@ -30,16 +30,6 @@ class MicrobiomeLitQA_ResearchQAGeneration:
             "quality_filter": self.quality_filter,
         }
 
-    @staticmethod
-    def add_arguments(parser):
-        parser.add_argument("--model", help="Which split of the dataset to use.")
-        parser.add_argument("--generation_kwargs", help="Which split of the dataset to use.")
-        parser.add_argument("--start_step", default="qa", choices=["qa", "distractors", "quality_filter"], help="Step to start running from. Defaults to the first step.")
-        parser.add_argument("--end_step", default="all", choices=["qa", "distractors", "quality_filter", "all"], help="Run up to and including this step. By default, runs all steps.")
-        parser.add_argument("--input_file", help="Path to a jsonl file to use as input to --start_step. Defaults to the paper info file for the first step.")
-        parser.add_argument("--seed", type=int, default=42, help="Random seed.")
-        parser.add_argument("--out_dir", help="Output file")
-
 
     def gen_qa_pairs(self, paper_info, llm, cache_path, generation_kwargs):
         # Check if cache file exists
@@ -84,7 +74,7 @@ Identify the main research question(s) that the paper is trying to answer along 
         responses = llm.batch_call(prompts_batched, max_workers=10, **generation_kwargs)
         # breakpoint()
         outputs = []
-        for response in responses:
+        for paper, response in zip(paper_info, responses):
             response_content = response["content"].strip()
 
             # extract the json from between ```json and ```
@@ -223,6 +213,18 @@ Respond with a JSON array of exactly 4 distractor strings:
             for item in outputs:
                 f.write(json.dumps(item) + "\n")
 
+
+        random.seed(42)
+        def preview_sample(samples, sample_i):
+            sample = samples[sample_i]
+            print(f"{sample_i}. Question ID:", sample["question_id"])
+            print("Question:", sample["question"])
+            print("\n".join(sample["options"]))
+            print("\nAnswer:", sample["answer"])
+            print("\n", "-" * 80, "\n")
+
+        for sample_i in random.sample(list(range(len(outputs))), 5):
+            preview_sample(outputs, sample_i)
         return outputs
     
     def quality_filter(self, qa_pairs_distractors, llm, cache_path, generation_kwargs):
@@ -233,6 +235,20 @@ Respond with a JSON array of exactly 4 distractor strings:
             print(f"Loaded {len(qa_pairs_quality_filter)} QA pairs with quality filter from cache.")
             return qa_pairs_quality_filter
         
+
+
+    @staticmethod
+    def add_arguments(parser):
+        parser.add_argument("--limit", default=None, help="count")
+        parser.add_argument("--start", default=0, help="start idx")
+        parser.add_argument("--model", help="Which model to use for all steps")
+        parser.add_argument("--generation_kwargs", help="Which split of the dataset to use.")
+        parser.add_argument("--start_step", default="qa", choices=["qa", "distractors", "quality_filter"], help="Step to start running from. Defaults to the first step.")
+        parser.add_argument("--end_step", default="all", choices=["qa", "distractors", "quality_filter", "all"], help="Run up to and including this step. By default, runs all steps.")
+        parser.add_argument("--input_file", help="Path to a jsonl file to use as input to --start_step. Defaults to the paper info file for the first step.")
+        parser.add_argument("--seed", type=int, default=42, help="Random seed.")
+        parser.add_argument("--out_dir", help="Output file")
+
 
     def run(self, args):
         random.seed(args.seed)
@@ -255,11 +271,15 @@ Respond with a JSON array of exactly 4 distractor strings:
         steps = list(self.steps.items())
         start_idx = next(i for i, (s, _) in enumerate(steps) if s == args.start_step)
 
+        start = int(args.start)
+        limit = int(args.limit) if args.limit is not None else len(step_inputs)
+
         force_rerun = False
         for step_i, (step, step_fn) in enumerate(steps):
             if step_i < start_idx:
                 continue
 
+            step_inputs = step_inputs[start: start + limit]
             print(f"Running step {step_i + 1}/{len(steps)}: {step}")
 
             cache_path = cache_dir / f"{step}.jsonl"

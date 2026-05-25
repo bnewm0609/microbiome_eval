@@ -137,13 +137,15 @@ class LLM:
                 print(run_output["content"])
                 results.append(run_output)
         else:
+            results = [None] * len(batch_messages)
             with ThreadPoolExecutor(max_workers=max_workers) as executor:
-                futures = [executor.submit(self.call, prompt, **generation_kwargs) for prompt in batch_messages]
+                futures = {executor.submit(self.call, prompt, **generation_kwargs): i for i, prompt in enumerate(batch_messages)}
                 for future in tqdm(as_completed(futures), total=len(futures)):
+                    i = futures[future]
                     try:
                         result = future.result()
                     except Exception as e:
                         print(f"Worker failed with exception: {e}")
                         continue
-                    results.append(result)
+                    results[i] = result
         return results

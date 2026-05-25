@@ -13,16 +13,21 @@ VLLM_SERVERS_DIR = Path(__file__).parent.parent / "vllm_servers"
 DEFAULT_PORT = 37140
 
 
-def get_next_port() -> int:
+def get_open_port() -> int:
     json_files = glob.glob(str(VLLM_SERVERS_DIR / "*.json"))
     if not json_files:
         return DEFAULT_PORT
-    max_port = DEFAULT_PORT - 1
+
+    used_ports = []
     for f in json_files:
         with open(f) as fh:
             data = json.load(fh)
-        max_port = max(max_port, data["port"])
-    return max_port + 1
+        used_ports.append(data["port"])
+    
+    next_port = DEFAULT_PORT
+    while next_port in used_ports:
+        next_port += 1
+    return next_port
 
 
 def parse_model_from_command(command: str) -> str:
@@ -47,15 +52,17 @@ def main():
     in_apptainer = bool(os.environ.get("APPTAINER_CONTAINER") or os.environ.get("SINGULARITY_CONTAINER"))
     conda_env = os.environ.get("CONDA_DEFAULT_ENV", "")
     in_correct_conda = conda_env in ("nvcc129", "nvcc130")
+    print(in_apptainer, in_correct_conda)
 
     if not (in_apptainer and in_correct_conda):
         script = Path(__file__).parent / "launch_vllm_server.sh"
         python_cmd = " ".join(shlex.quote(arg) for arg in [sys.executable] + sys.argv)
-        os.execvp("/bin/bash", ["/bin/bash", str(script), python_cmd])
+        print(str(script), python_cmd)
+        os.execvp("/usr/bin/bash", ["/usr/bin/bash", str(script), python_cmd])
         return
 
     model = parse_model_from_command(args.command)
-    port = get_next_port()
+    port = get_open_port()
 
     VLLM_SERVERS_DIR.mkdir(parents=True, exist_ok=True)
     server_file = VLLM_SERVERS_DIR / f"{model.replace('/', '_')}.json"
