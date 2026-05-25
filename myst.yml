@@ -1,0 +1,18 @@
+# See docs at: https://mystmd.org/guide/frontmatter
+version: 1
+
+project:
+  id: 4da9cb15-177c-41f5-8c4e-6a24b4e87eab
+  title: Microbiome Eval Notebooks
+  toc:
+    - file: notebooks/Exploration 1.ipynb
+  # description:
+  # keywords: []
+  # authors: []
+  # github:
+  # To autogenerate a Table of Contents, run "jupyter book init --write-toc"
+site:
+  template: book-theme
+  # options:
+  #   favicon: favicon.ico
+  #   logo: site_logo.png
