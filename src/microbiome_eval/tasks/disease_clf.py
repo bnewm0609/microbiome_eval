@@ -9,6 +9,7 @@ class DiseaseClassificationTask(BaseTask):
     @staticmethod
     def add_arguments(parser):
         parser.add_argument("--taxa", default="genus", choices=["genus", "species"], help="Which taxonomy level to use. 2075/2120 have genus taxonomies. 512/2120 have species-level.")
+        parser.add_argument("--include_choices", action="store_true", help="Give model the 200 disease options.")
         parser.add_argument("--judge_model", default="Qwen/Qwen-32B", help="Model to use for judging the correctness of the model's responses. Should be a local vLLM model to avoid excessive costs.")
         parser.add_argument("--judge_generation_kwargs", default="{}", help="Generation kwargs to use for the judge model calls, e.g. --judge_generation_kwargs '{\"temperature\": 0.7, \"max_tokens\": 512}'")
 
@@ -32,13 +33,23 @@ class DiseaseClassificationTask(BaseTask):
             prompt_key = "prompt_species"
 
         system_message = "You are a helpful and precise assistant for answering medical diagnostic questions. The last line of your answer should be a short word or phrase corresponding to the disease you think is most likely given the patient's gut microbiome taxonomy."
+
+        prompt_template = "{prompt}"
+        if self.config.get("include_choices", False):
+            disease_options = {
+                sample["gold_label_set"][0] for sample in dataset if sample["gold_label_set"]
+            }
+            print(len(disease_options), "unique disease options")
+            options = "\n".join(f"- {disease}" for disease in sorted(disease_options))
+            prompt_template += f"\n\nHere are the possible disease options to choose from:\n{options}"
+
         prompts = []
         for sample in dataset:
             if not sample[prompt_key] or isinstance(sample[prompt_key], float):  # skip samples with empty prompts (which are represented as NaNs in the jsonl)
                 continue
             prompts.append(
                 sample | {
-                    "prompt": sample["prompt_genus"],
+                    "prompt": prompt_template.format(prompt=sample["prompt_genus"]),
                     "system_message": system_message,
                 })
         

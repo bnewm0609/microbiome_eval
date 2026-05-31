@@ -6,7 +6,6 @@ template_header = """#!/bin/bash
 #SBATCH --partition={partition}
 #SBATCH --account=xlab
 #SBATCH --nodes=1
-#SBATCH --cpus-per-task=4
 #SBATCH --mem={memory}
 #SBATCH --time={time}
 #SBATCH --output={out_file_path}-%j.out
@@ -48,6 +47,7 @@ def submit_job(
     out_dir=None,
     enable_apptainer=False,
     signal=None,
+    ncpu="4",
 ):
     additional_args = []
     if "ckpt" in partition:
@@ -68,6 +68,8 @@ def submit_job(
         additional_args.append(f"#SBATCH --dependency={dependency}")
     if signal is not None:
         additional_args.append(f"#SBATCH --signal={signal}")
+
+    additional_args.append(f"#SBATCH --cpus-per-task={ncpu}") # 4 by default
 
 
     if out_dir is not None:
@@ -153,6 +155,7 @@ def main():
     argp.add_argument("--dependency", type=str)
     argp.add_argument("--mem", type=str, default="64G")
     argp.add_argument("--ngpu", type=str, default="1")
+    argp.add_argument("--ncpu", type=str, default="4")
     argp.add_argument(
         "--out_dir",
         type=str,

@@ -9,8 +9,8 @@ def load_task(task_name):
         from microbiome_eval.tasks.microbiome_reasoning import MicrobiomeReasoningTask
         return MicrobiomeReasoningTask
     elif task_name == "microbiome_litqa":
-        from microbiome_eval.tasks.microbiome_litqa import MicrobiomeLitQATask
-        return MicrobiomeLitQATask
+        from microbiome_eval.tasks.microbiome_litqa import MicrobiomeLitQA
+        return MicrobiomeLitQA
     elif task_name == "med_qa":
         from microbiome_eval.tasks.medqa import MedQATask
         return MedQATask

@@ -77,12 +77,15 @@ def main():
         tokens[port_idx + 1] = str(port)
 
     def cleanup(signum=None, frame=None):
+        print("Cleaning up server in `clenaup` handler")
         server_file.unlink(missing_ok=True)
         if proc is not None:
             proc.terminate()
         sys.exit(0)
 
     proc = None
+    # This signal handling thing doesn't work. I don't know why and claude code isn't helping me debug it.
+    # The `cleanup` function is never called. I even tried to send a SIGKILL 60 seconds before.
     for sig in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
         signal.signal(sig, cleanup)
 

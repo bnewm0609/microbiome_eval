@@ -54,6 +54,10 @@ class MedQATask(BaseTask):
         dataset = dataset[start: start + limit]
 
         system_message = "You are a helpful and precise assistant for answering medical questions. The last line of your answer should be a single letter corresponding to the correct answer choice on its own line."
+        if self.config.get("model").lower() == "google/medgemma-1.5-4b-it":
+            # medgemma isn't a reasoning model, so we should specifically prompt it to think step-by-step
+            # similar to here: https://github.com/Google-Health/medgemma/blob/main/notebooks/evaluate_on_medqa.ipynb
+            system_message = "You are a helpful and precise assistant for answering medical questions. The last line of your answer should be a single letter corresponding to the correct answer choice on its own line. Think step by step."
         prompts = []
         for sample in dataset:
             question = sample["question"]
@@ -81,7 +85,7 @@ class MedQATask(BaseTask):
             lines = [line.strip() for line in response.strip().splitlines()]
             last_line = next((line for line in reversed(lines) if line), "")
             # Strip common punctuation suffixes like "D." or "D)"
-            last_line = last_line.strip(".:)( ")
+            last_line = last_line.strip("*.:)( ")
             pred = last_line[0].upper() if last_line and last_line[0].upper() in options else None
 
             results_metrics.append(result | {

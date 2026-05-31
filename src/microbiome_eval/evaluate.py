@@ -120,6 +120,12 @@ def main():
             f.write(json.dumps(gen) + "\n")
     print(f"Saved {len(generations)} generations to:\n{generations_file}")
 
+    # generations_file = out_dir / "generations.jsonl"
+    # if generations_file.exists():
+    #     print(f"Generations file already exists at: {generations_file}, skipping generation.")
+    #     with open(generations_file) as f:
+    #         generations = [json.loads(line) for line in f]
+
     # next, run evaluation:
     metrics_file = out_dir / "metrics.jsonl"
     if not metrics_file.exists():

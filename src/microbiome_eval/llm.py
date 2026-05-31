@@ -129,7 +129,7 @@ class LLM:
         
         raise RuntimeError("LLM call failed after 3 attempts")
 
-    def batch_call(self, batch_messages, max_workers=5, **generation_kwargs):
+    def batch_call(self, batch_messages, max_workers=10, **generation_kwargs):
         results = []
         if self.debug:
             for prompt in batch_messages:
