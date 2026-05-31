@@ -35,6 +35,29 @@ def compress_generation_kwargs(kwargs: dict) -> str:
     return "-".join(parts)
 
 
+def compress_config(config: dict, exclude: set = None) -> str:
+    """Return a compact, path-safe string of all config values, excluding specified keys."""
+    exclude = exclude or set()
+    parts = []
+    for k, v in sorted(config.items()):
+        if k in exclude:
+            continue
+        k_abbr = "".join(word[0] for word in k.split("_"))
+        if k == "generation_kwargs":
+            gkw = json.loads(v) if isinstance(v, str) and v else {}
+            v_str = compress_generation_kwargs(gkw) if gkw else "default"
+        elif isinstance(v, str):
+            v_str = v.replace("/", "_")
+        elif v is None:
+            v_str = "none"
+        elif isinstance(v, bool):
+            v_str = str(v).lower()
+        else:
+            v_str = str(v)
+        parts.append(f"{k_abbr}-{v_str}")
+    return "_".join(parts)
+
+
 # def run(model, prompt, config):
 #     generation_kwargs = config.get("generation_kwargs", "{}")
 #     generation_kwargs = json.loads(generation_kwargs)  # No explicit defaults
@@ -83,10 +106,11 @@ def main():
 
     model = LLM(args.model, use_cache=False, debug=args.debug)
 
-    # form the output directory name based on the config  
+    # form the output directory name based on the config
     generation_kwargs = json.loads(config.get("generation_kwargs", "{}"))  # No explicit defaults
     gkw_suffix = f"_gkw_{compress_generation_kwargs(generation_kwargs)}" if generation_kwargs else ""
-    out_dir = Path(args.out_dir) / f"{args.task}_{args.model.replace('/', '_')}_{args.limit if args.limit is not None else 'all'}_sd{args.seed}{gkw_suffix}"
+    # out_dir = Path(args.out_dir) / f"{args.task}_{args.model.replace('/', '_')}_{args.limit if args.limit is not None else 'all'}_sd{args.seed}{gkw_suffix}"
+    out_dir = Path(args.out_dir) / compress_config(config, exclude={"max_workers", "out_dir"})
     out_dir.mkdir(parents=True, exist_ok=True)
     print(f"Saving outputs to: {out_dir}")
 
