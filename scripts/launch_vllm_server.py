@@ -8,6 +8,7 @@ import signal
 import socket
 import subprocess
 import sys
+from datetime import datetime
 from pathlib import Path
 
 VLLM_SERVERS_DIR = Path(__file__).parent.parent / "vllm_servers"
@@ -44,6 +45,22 @@ def parse_model_from_command(command: str) -> str:
     return tokens[serve_idx + 1]
 
 
+def parse_num_gpus_from_command(command: str) -> int:
+    tokens = shlex.split(command)
+
+    def get_flag(flags):
+        for flag in flags:
+            if flag in tokens:
+                idx = tokens.index(flag)
+                if idx + 1 < len(tokens):
+                    return int(tokens[idx + 1])
+        return 1
+
+    tp = get_flag(("--tensor-parallel-size", "-tp"))
+    dp = get_flag(("--data-parallel-size", "-dp"))
+    return tp * dp
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("command", help="The full 'vllm serve ...' command to run")
@@ -63,14 +80,21 @@ def main():
         return
 
     model = parse_model_from_command(args.command)
+    num_gpus = parse_num_gpus_from_command(args.command)
+    model_safe = model.replace("/", "_")
+    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
 
     VLLM_SERVERS_DIR.mkdir(parents=True, exist_ok=True)
-    server_file = VLLM_SERVERS_DIR / f"{model.replace('/', '_')}.json"
+    server_file = VLLM_SERVERS_DIR / f"vllm-{model_safe}-{num_gpus}-{timestamp}.json"
     with open(VLLM_SERVERS_DIR / ".port.lock", "w") as lock_fh:
         fcntl.flock(lock_fh, fcntl.LOCK_EX)
         port = get_open_port()
         with open(server_file, "w") as fh:
-            json.dump({"hostname": socket.gethostname(), "port": port}, fh, indent=2)
+            json.dump(
+                {"hostname": socket.gethostname(), "port": port, "model_name": model, "num_gpus": num_gpus},
+                fh,
+                indent=2,
+            )
 
     tokens = shlex.split(args.command)
     if "--port" not in tokens:

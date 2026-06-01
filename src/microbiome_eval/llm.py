@@ -28,13 +28,20 @@ VLLM_EXTRA_PARAMETERS = {
     "chat_template_kwargs",
 }
 
-def wait_for_vllm(hostname: str, port: int, timeout: int = 1200):
+def wait_for_vllm(hostname: str, port: int, model_name: str | None = None, timeout: int = 1200):
     start = time.time()
     while time.time() - start < timeout:
         try:
-            response = requests.get(f"http://{hostname}:{port}/health")
-            if response.status_code == 200:
-                return
+            if requests.get(f"http://{hostname}:{port}/health").status_code != 200:
+                raise requests.exceptions.RequestException("not healthy")
+            if model_name is not None:
+                models = requests.get(f"http://{hostname}:{port}/v1/models").json()
+                loaded = {m["id"] for m in models.get("data", [])}
+                if model_name not in loaded:
+                    print(f"Waiting for model '{model_name}' to be registered by proxy (loaded: {loaded})...", flush=True)
+                    time.sleep(5)
+                    continue
+            return
         except requests.exceptions.RequestException:
             print(f"Waiting for vllm to startup...", flush=True)
             time.sleep(5)
@@ -57,21 +64,32 @@ class LLM:
             # we have a local model... we need to check if the vllm server is up, and if not tell the user to start it.
             # if it's up, we need to create an ssh tunnel to it if needed and wait for it to be ready to accept requests.
 
-            # read the port and the node from the file (this file should be written by the "launch_vllm_server.py" script)
-            job_name = model_name.replace("/", "_")
+            # read server info: prefer the proxy, fall back to a direct vllm server file
+            vllm_servers_dir = Path(__file__).parent.parent.parent / "vllm_servers"
+            proxy_file = vllm_servers_dir / "proxy.json"
+            model_safe = model_name.replace("/", "_")
             while True:
-                try:
-                    with open(Path(__file__).parent.parent.parent / f"vllm_servers/{job_name}.json") as f:
+                if proxy_file.exists():
+                    with open(proxy_file) as f:
                         server_info = json.load(f)
+                    wait_model = model_name  # ask wait_for_vllm to confirm model is registered
                     break
-                except FileNotFoundError:
-                    print(f"No info file found for vLLM server with model name '{model_name}'. Please start the server and make sure it writes its info to 'vllm_servers/{job_name}.json'")
-                    time.sleep(60)  # wait a while bc even if we catch this immediately, the server needs time to start up
-            
+                matches = list(vllm_servers_dir.glob(f"vllm-{model_safe}-*.json"))
+                if matches:
+                    with open(matches[0]) as f:
+                        server_info = json.load(f)
+                    wait_model = None  # direct vllm server; no /v1/models check needed
+                    break
+                print(
+                    f"No proxy or direct server file found for '{model_name}'. "
+                    f"Start the proxy (launch_vllm_proxy_server.py) or a direct vllm server.",
+                    flush=True,
+                )
+                time.sleep(60)
+
             self.port = server_info["port"]
             self.hostname = server_info["hostname"]
-            # wait for the server to be up and accepting connections
-            wait_for_vllm(server_info["hostname"], self.port)
+            wait_for_vllm(server_info["hostname"], self.port, model_name=wait_model)
         
             self.client = openai.OpenAI(
                 base_url=f"http://{server_info['hostname']}:{self.port}/v1",
