@@ -1,4 +1,5 @@
 import argparse
+import fcntl
 import glob
 import json
 import os
@@ -62,12 +63,14 @@ def main():
         return
 
     model = parse_model_from_command(args.command)
-    port = get_open_port()
 
     VLLM_SERVERS_DIR.mkdir(parents=True, exist_ok=True)
     server_file = VLLM_SERVERS_DIR / f"{model.replace('/', '_')}.json"
-    with open(server_file, "w") as fh:
-        json.dump({"hostname": socket.gethostname(), "port": port}, fh, indent=2)
+    with open(VLLM_SERVERS_DIR / ".port.lock", "w") as lock_fh:
+        fcntl.flock(lock_fh, fcntl.LOCK_EX)
+        port = get_open_port()
+        with open(server_file, "w") as fh:
+            json.dump({"hostname": socket.gethostname(), "port": port}, fh, indent=2)
 
     tokens = shlex.split(args.command)
     if "--port" not in tokens:

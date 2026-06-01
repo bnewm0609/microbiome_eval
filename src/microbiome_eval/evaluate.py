@@ -43,7 +43,7 @@ def compress_config(config: dict, exclude: set = None) -> str:
         if k in exclude:
             continue
         k_abbr = "".join(word[0] for word in k.split("_"))
-        if k == "generation_kwargs":
+        if k == "generation_kwargs" or k == "judge_generation_kwargs":
             gkw = json.loads(v) if isinstance(v, str) and v else {}
             v_str = compress_generation_kwargs(gkw) if gkw else "default"
         elif isinstance(v, str):
@@ -104,8 +104,6 @@ def main():
     config = vars(args)
     task = task_cls(config)
 
-    model = LLM(args.model, use_cache=False, debug=args.debug)
-
     # form the output directory name based on the config
     generation_kwargs = json.loads(config.get("generation_kwargs", "{}"))  # No explicit defaults
     gkw_suffix = f"_gkw_{compress_generation_kwargs(generation_kwargs)}" if generation_kwargs else ""
@@ -120,29 +118,39 @@ def main():
 
     prompts = task.get_prompts()
 
-    # create prompts
-    messages_batched = []
-    for prompt in prompts:
-        messages = []
-        if prompt.get("system_message"):
-            messages.append({"role": "system", "content": prompt["system_message"]})
-        messages.append({"role": "user", "content": prompt["prompt"]})
-        messages_batched.append(messages)
-
-    responses = model.batch_call(messages_batched, max_workers=args.max_workers, **generation_kwargs)
-    generations = []
-    for prompt, messages, response in zip(prompts, messages_batched, responses):
-        generations.append({
-            "response": response["content"],
-            **prompt,
-            "messages": messages + [{"role": "assistant"} | response],
-        })
-
     generations_file = out_dir / "generations.jsonl"
-    with open(generations_file, "w") as f:
-        for gen in generations:
-            f.write(json.dumps(gen) + "\n")
-    print(f"Saved {len(generations)} generations to:\n{generations_file}")
+    if generations_file.exists():
+        print(f"Generations file already exists at: {generations_file}, skipping generation.")
+        with open(generations_file) as f:
+            generations = [json.loads(line) for line in f]
+    else:
+
+        # load model
+        model = LLM(args.model, use_cache=False, debug=args.debug)
+
+        # create prompts
+        messages_batched = []
+        for prompt in prompts:
+            messages = []
+            if prompt.get("system_message"):
+                messages.append({"role": "system", "content": prompt["system_message"]})
+            messages.append({"role": "user", "content": prompt["prompt"]})
+            messages_batched.append(messages)
+
+        responses = model.batch_call(messages_batched, max_workers=args.max_workers, **generation_kwargs)
+        generations = []
+        for prompt, messages, response in zip(prompts, messages_batched, responses):
+            generations.append({
+                "response": response["content"],
+                **prompt,
+                "messages": messages + [{"role": "assistant"} | response],
+            })
+
+        generations_file = out_dir / "generations.jsonl"
+        with open(generations_file, "w") as f:
+            for gen in generations:
+                f.write(json.dumps(gen) + "\n")
+        print(f"Saved {len(generations)} generations to:\n{generations_file}")
 
     # generations_file = out_dir / "generations.jsonl"
     # if generations_file.exists():
