@@ -101,7 +101,7 @@ class LLM:
             )
 
     
-    def call(self, messages, **generation_kwargs):
+    def call(self, messages, validation_fn=None, **generation_kwargs):
         """
         Implements a single message call to the model.
         with retries and caching. (currently caching isn't implemented)
@@ -133,6 +133,14 @@ class LLM:
                         **params,
                     )
 
+                    # check validation fn if present
+                    if validation_fn is not None:
+                        try:
+                            validation_fn(response)
+                        except Exception as e:
+                            print(f"Validation failed for response: {e}. Retrying...")
+                            continue
+
                     # check if we're we're in non-thinking mode but the content is none bc the reasoning parser is stupid.
                     # It sometimes parses content into reasoning_content
                     response_dict = response.model_dump()['choices'][0]['message']
@@ -147,7 +155,7 @@ class LLM:
         
         raise RuntimeError("LLM call failed after 3 attempts")
 
-    def batch_call(self, batch_messages, max_workers=10, **generation_kwargs):
+    def batch_call(self, batch_messages, max_workers=10, validation_fn=None, **generation_kwargs):
         results = []
         if self.debug:
             for prompt in batch_messages:
@@ -157,7 +165,7 @@ class LLM:
         else:
             results = [None] * len(batch_messages)
             with ThreadPoolExecutor(max_workers=max_workers) as executor:
-                futures = {executor.submit(self.call, prompt, **generation_kwargs): i for i, prompt in enumerate(batch_messages)}
+                futures = {executor.submit(self.call, prompt, validation_fn, **generation_kwargs): i for i, prompt in enumerate(batch_messages)}
                 for future in tqdm(as_completed(futures), total=len(futures)):
                     i = futures[future]
                     try:

@@ -68,12 +68,8 @@ Return just the json object in markdown format. Do not include any other text in
     def parse_json_to_dict(cls, json_string: str) -> dict:
         # Remove markdown-style ```json``` markers if present
         json_cleaned = re.sub(r"^```json\s*|\s*```$", "", json_string.strip())
-
-        try:
-            return json.loads(json_cleaned)
-        except json.JSONDecodeError as e:
-            print(f"JSON decoding failed: {e}")
-            return {}
+        return json.loads(json_cleaned)
+        
 
     @classmethod
     def calculate_score(
@@ -129,8 +125,8 @@ Return just the json object in markdown format. Do not include any other text in
                 grader_prompt = cls.GRADER_TEMPLATE.replace("<<conversation>>", convo_str).replace("<<rubric_item>>", rubric_item_str)
                 grader_prompts.append([{"role": "user", "content": grader_prompt}])
         
-        breakpoint()
-        grader_responses = grader_llm.batch_call(grader_prompts, temperature=0.5, max_tokens=2048, max_workers=5)
+
+        grader_responses = grader_llm.batch_call(grader_prompts, validation_fn=cls.parse_json_to_dict, temperature=0.5, max_tokens=2048, max_workers=5)
         results_metrics = []
         grader_response_idx = 0
         for result in results:
@@ -138,7 +134,11 @@ Return just the json object in markdown format. Do not include any other text in
             for rubric_item in result["sample"]["rubrics"]:
                 grader_response = grader_responses[grader_response_idx]
                 grader_response_idx += 1
-                grader_json = cls.parse_json_to_dict(grader_response["content"])
+                try:
+                    grader_json = cls.parse_json_to_dict(grader_response["content"])
+                except json.JSONDecodeError as e:
+                    print(f"JSON decoding failed: {e}")
+                    grader_json = {}
                 grader_responses_dicts.append(grader_json)
 
             overall_score = cls.calculate_score(result["sample"]["rubrics"], grader_responses_dicts)
