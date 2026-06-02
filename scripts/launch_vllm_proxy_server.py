@@ -95,7 +95,7 @@ async def forward(server: Server, path: str, request: Request) -> Response:
     url = f"http://{server.hostname}:{server.port}/{path}"
     body = await request.body()
     headers = {k: v for k, v in request.headers.items() if k.lower() != "host"}
-
+    # print(f"[proxy] Forwarding to {url} with headers {headers} and body {body[:100]}...", flush=True)
     for attempt in range(3):
         try:
             resp = await http_client.request(
@@ -134,6 +134,7 @@ async def proxy(path: str, request: Request) -> Response:
             status_code=404,
             content={"error": f"Model '{model_name}' has not been initialized yet. Available: {list(registry.keys())}"},
         )
+    print("[proxy] Forwarding request for model", model_name, "to", server.hostname, server.port, flush=True)
     return await forward(server, path, request)
 
 
@@ -144,7 +145,7 @@ async def proxy(path: str, request: Request) -> Response:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global http_client
-    http_client = httpx.AsyncClient()
+    http_client = httpx.AsyncClient(trust_env=False)
     scan_for_new_servers()
     poll_task = asyncio.create_task(_poll_loop())
     yield
@@ -180,6 +181,7 @@ async def list_models():
 
 @app.post("/v1/chat/completions")
 async def completions(request: Request):
+    # print("Running completions proxy handler", flush=True)
     return await proxy("v1/chat/completions", request)
 
 
@@ -194,7 +196,7 @@ async def responses(request: Request):
 
 def _get_open_port() -> int:
     used: list[int] = []
-    for f in VLLM_SERVERS_DIR.glob("*.json"):
+    for f in VLLM_SERVERS_DIR.glob("vllm*.json"):
         try:
             used.append(json.loads(f.read_text())["port"])
         except Exception:

@@ -43,6 +43,20 @@ And here are the criteria to judge the model's next response:
 
 Now it's your turn. Identify whether the conversation is about the microbiome and if it should be kept or discarded. The last line of your response should be either "keep" or "discard", but lines before that can be your reasoning.
 """.strip(),
+
+    "medxpert_v1": """
+Help me filter the following medical-related multiple choice question provided to evaluate a language model. I want to keep only questions that require knowledge of the human gut microbiome to answer.
+You are provided with the question and answer choices, and you should respond with "keep" if the questio requires knowledge of the human gut microbiome to answer, and "discard" if it does not.
+If you are unsure, you should respond with "keep" to be safe. 
+
+Here is the question:
+{question}
+{options}
+
+Answer: {answer}
+
+Now it's your turn. Identify whether the question requires knowledge of the human gut microbiome and if it should be kept or discarded. The last line of your response should be either "keep" or "discard", but lines before that can be your reasoning.
+""".strip()
 }
 
 
@@ -59,8 +73,6 @@ def healthbench(args):
     run_num = len(list(out_dir.glob("run_*.jsonl")))
     out_file = out_dir / f"run_{run_num:03d}-prompt_{args.prompt}.jsonl"
     print(f"Saving to {out_file}")
-
-
 
     prompt_template = PROMPTS[args.prompt]
 
@@ -111,40 +123,20 @@ def healthbench(args):
 
 
 def healthbench_professional(args):
-
+    # load data/model/prompts
     data = load_dataset("openai/healthbench-professional")["test"]
-    
-    model = LLM("google/gemma-4-31B-it")
-
-    prompt_template = """
-Help me filter the following medical-related prompts provided to a language model. I want to keep only prompts that potentially have to do with the human gut microbiome.
-You are provided with the prompt and a set of criteria that are used to evaluate the model's response to the prompt.
-You should respond with "keep" if the main topic of the question or rubric features the human gut microbiome, and "discard" if it is not.
-If you are unsure, you should respond with "keep" to be safe. 
-
-Here is the prompt:
-{prompt}
-
-And here are the criteria:
-{criteria}
-
----
-
-Now it's your turn. Identify whether this prompt is about the microbiome and if it should be kept or discarded. The last line of your response should be either "keep" or "discard", but lines before that can be your reasoning.
-""".strip()
-
     model = LLM(args.model)
     gen_kwargs = json.loads(args.gen_kwargs)
+    prompt_template = PROMPTS[args.prompt]
+    
+    # prepare out directory
     out_dir = Path(args.output_path) / args.dataset
     out_dir.mkdir(parents=True, exist_ok=True)
     run_num = len(list(out_dir.glob("run_*.jsonl")))
     out_file = out_dir / f"run_{run_num:03d}-prompt_{args.prompt}.jsonl"
     print(f"Saving to {out_file}")
 
-
-    prompt_template = PROMPTS[args.prompt]
-
-
+    # format prompts
     prompts = []
     for sample in data:
         all_criteria = []
@@ -152,7 +144,6 @@ Now it's your turn. Identify whether this prompt is about the microbiome and if 
             all_criteria.append(
                 f"- {rubric['criterion_text']}"
             )
-        # breakpoint()
         conversation= "\n\n".join([f"{turn['role']}:\n{turn['content']}" for turn in sample['conversation']['messages']])
         prompts.append([{
             "role": "user",
@@ -162,7 +153,7 @@ Now it's your turn. Identify whether this prompt is about the microbiome and if 
             )
         }])
 
-    gen_kwargs = {}
+    # run model and parse responses
     resp = model.batch_call(prompts, **gen_kwargs)
     keep_idxs = []
     discard_idxs = []
@@ -176,7 +167,7 @@ Now it's your turn. Identify whether this prompt is about the microbiome and if 
         else:
             amgiguous_idxs.append(i)
     
-
+    # save outputs
     config = vars(args)
     config = {f"_{k}": v for k, v in config.items() if k not in ("output_path",)}
     with open(out_file, "w") as f:
@@ -189,6 +180,78 @@ Now it's your turn. Identify whether this prompt is about the microbiome and if 
     print(f"Kept {len(keep_idxs)} samples, discarded {len(discard_idxs)} samples, and marked {len(amgiguous_idxs)} samples as ambiguous.")
     print("Saved filtered samples to", out_file)
 
+
+def MedXpertQA(args):
+    """
+    Valid prompts:
+    - medxpert_v1
+    """
+    valid_prompts = {"medxpert_v1"}
+    if args.prompt not in valid_prompts:
+        raise ValueError(f"Invalid prompt: {args.prompt}. Valid prompts are: {valid_prompts}")
+
+    # load data/model/prompts
+    data = load_dataset("TsinghuaC3I/MedXpertQA", "Text")
+    model = LLM(args.model)
+    gen_kwargs = json.loads(args.gen_kwargs)
+    prompt_template = PROMPTS[args.prompt]
+    
+    # prepare out directory
+    out_dir = Path(args.output_path) / args.dataset
+    out_dir.mkdir(parents=True, exist_ok=True)
+    run_num = len(list(out_dir.glob("run_*.jsonl")))
+    out_file_dev = out_dir / f"run_{run_num:03d}-prompt_{args.prompt}.dev.jsonl"
+    out_file_test = out_dir / f"run_{run_num:03d}-prompt_{args.prompt}.test.jsonl"
+    print(f"Saving to {out_file_dev}")
+    print(f"Saving to {out_file_test}")
+
+    # let's filter both the dev and the test splits
+    def filter_split(split):
+        # format prompts
+        prompts = []
+        for sample in data[split]:
+            options = "\n".join([f"{k}. {choice}" for k, choice in sample['options'].items()])
+            prompts.append([{
+                "role": "user",
+                "content": prompt_template.format(
+                    question=sample['question'],
+                    options=options,
+                    answer=sample['label']
+                )
+            }])
+
+        # run model and parse responses
+        resp = model.batch_call(prompts, **gen_kwargs)
+        keep_idxs = []
+        discard_idxs = []
+        amgiguous_idxs = []
+        for i, r in enumerate(resp):
+            r = r['content'].splitlines()[-1].strip().lower()
+            if "keep" in r:
+                keep_idxs.append(i)
+            elif "discard" in r:
+                discard_idxs.append(i)
+            else:
+                amgiguous_idxs.append(i)
+        
+        # save outputs
+        config = vars(args)
+        config = {f"_{k}": v for k, v in config.items() if k not in ("output_path",)}
+        out_file = out_dir / f"run_{run_num:03d}-prompt_{args.prompt}.{split}.jsonl"
+        with open(out_file, "w") as f:
+            # filter_hash = hashlib.md5((model.model_name + json.dumps(gen_kwargs) + prompt_template).encode('utf-8')).hexdigest()
+            for i in keep_idxs:
+                f.write(
+                    json.dumps({"_idx": i, "_run": run_num, **config, "_split": split, "_filter_response": resp[i], "sample": data[split][i]}) + "\n"
+                )
+        
+        print(f"Split {split}: Kept {len(keep_idxs)} samples, discarded {len(discard_idxs)} samples, and marked {len(amgiguous_idxs)} samples as ambiguous.")
+        print("Saved filtered samples to", out_file)
+        
+        return keep_idxs, discard_idxs, amgiguous_idxs, resp
+    
+    filter_split("dev")
+    filter_split("test")
 
 
 

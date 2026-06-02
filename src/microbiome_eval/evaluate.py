@@ -43,7 +43,7 @@ def compress_config(config: dict, exclude: set = None) -> str:
         if k in exclude:
             continue
         k_abbr = "".join(word[0] for word in k.split("_"))
-        if k == "generation_kwargs" or k == "judge_generation_kwargs":
+        if k == "generation_kwargs" or k == "judge_generation_kwargs" or k == "data_config":
             gkw = json.loads(v) if isinstance(v, str) and v else {}
             v_str = compress_generation_kwargs(gkw) if gkw else "default"
         elif isinstance(v, str):
@@ -81,7 +81,7 @@ def compress_config(config: dict, exclude: set = None) -> str:
 
 def main():
     parser = ArgumentParser()
-    parser.add_argument("--task", help="Name of the task to run", choices=["disease_classification", "microbiome_reasoning", "microbiome_litqa", "med_qa"])
+    parser.add_argument("--task", help="Name of the task to run", choices=["disease_classification", "microbiome_reasoning", "microbiome_litqa", "med_qa", "hard_microbiome_qs"])
     parser.add_argument("--model", help="Name of the model to evaluate")
     parser.add_argument("--generation_kwargs", help="Generation kwargs to use for the model calls, e.g. --generation_kwargs '{\"temperature\": 0.7, \"max_tokens\": 512}'", default=None)
     parser.add_argument("--start", type=int, default=0, help="Which example index to start running at (useful when parallelizing synthetic data generation",)
@@ -134,7 +134,11 @@ def main():
             messages = []
             if prompt.get("system_message"):
                 messages.append({"role": "system", "content": prompt["system_message"]})
-            messages.append({"role": "user", "content": prompt["prompt"]})
+            
+            if isinstance(prompt["prompt"], list):
+                messages.extend(prompt["prompt"])
+            else:
+                messages.append({"role": "user", "content": prompt["prompt"]})
             messages_batched.append(messages)
 
         responses = model.batch_call(messages_batched, max_workers=args.max_workers, **generation_kwargs)
