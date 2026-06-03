@@ -39,22 +39,21 @@ set -x
 
 # run the evals:
 models=(
-    "google/medgemma-1.5-4b-it"
+    # "google/medgemma-1.5-4b-it"
     "Qwen/Qwen3.5-9B"
-    "google/gemma-4-31B-it"
+    # "google/gemma-4-31B-it"
 )
 gen_kwargs=(
-    '{"temperature": 0.0}'
+    #'{"temperature": 0.0}'
     '{"temperature": 1.0, "top_p": 0.95, "top_k": 20, "min_p": 0.0, "presence_penalty": 1.5, "repetition_penalty": 1.0, "chat_template_kwargs": {"enable_thinking": true}}'
-    '{"temperature": 1.0, "top_p": 0.95, "top_k": 20, "min_p": 0.0, "presence_penalty": 1.5, "repetition_penalty": 1.0, "chat_template_kwargs": {"enable_thinking": true}}'
-    '{"temperature": 1.0, "top_p": 0.95, "top_k": 64, "chat_template_kwargs": {"enable_thinking": true}}'
+    #'{"temperature": 1.0, "top_p": 0.95, "top_k": 64, "chat_template_kwargs": {"enable_thinking": true}}'
 )
-out_dir="results/run-1_500_disease_choices/"
+out_dir="results/2_hard_microbiome_qs_v1/"
+data_config='{"healthbench": "001", "healthbench_professional": "001", "MedXpertQA": "001"}'
 
 for i in "${!models[@]}"; do
     model="${models[$i]}"
     gen_kwargs="${gen_kwargs[$i]}"
     
-    uv run -- python scripts/submit_job.py "$model-run-1_500_disease_choices" "uv run -- python src/microbiome_eval/evaluate.py --model \"$model\" --generation_kwargs '$gen_kwargs' --task disease_classification --taxa genus --seed 31 --limit 500 --out_dir \"$out_dir\" --max_workers 20 --judge_model google/gemma-4-31B-it --judge_generation_kwargs '{\"temperature\": 1.0, \"top_p\": 0.95, \"top_k\": 64, \"chat_template_kwargs\": {\"enable_thinking\": true}}'" --ngpu 0 --partition gpu-a100 --time 24:00:00 --mem 128G
+    uv run -- python scripts/submit_job.py "$model-2_hard_microbiome_qs_v1" "uv run -- python src/microbiome_eval/evaluate.py --model \"$model\" --generation_kwargs '$gen_kwargs' --seed 31 --limit 500 --out_dir \"$out_dir\" --max_workers 20 --task hard_microbiome_qs --data_config '$data_config'" --ngpu 0 --partition gpu-a100 --time 24:00:00 --mem 64G
 done
-    # uv run -- python src/microbiome_eval/evaluate.py --model "$model" --generation_kwargs "$gen_kwargs" --task disease_classification --taxa genus --seed 31 --limit 500 --out_dir "$out_dir" --max_workers 20 --judge_model google/gemma-4-31B-it --judge_generation_kwargs '{"temperature": 1.0, "top_p": 0.95, "top_k": 64, "chat_template_kwargs": {"enable_thinking": true}}'

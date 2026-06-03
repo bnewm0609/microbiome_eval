@@ -133,17 +133,18 @@ class LLM:
                         **params,
                     )
 
-                    # check validation fn if present
-                    if validation_fn is not None:
-                        try:
-                            validation_fn(response)
-                        except Exception as e:
-                            print(f"Validation failed for response: {e}. Retrying...")
-                            continue
 
                     # check if we're we're in non-thinking mode but the content is none bc the reasoning parser is stupid.
                     # It sometimes parses content into reasoning_content
                     response_dict = response.model_dump()['choices'][0]['message']
+                    # check validation fn if present
+                    if validation_fn is not None:
+                        try:
+                            validation_fn(response_dict)
+                        except Exception as e:
+                            print(f"Validation failed for response: {e}. Retrying...")
+                            continue
+
                     if not response_dict["content"] and ((not generation_kwargs.get("chat_template_kwargs", {}).get("enable_thinking", False)) or ("Thinking" not in self.model_name)):
                         response_dict["content"] = response_dict.get("reasoning_content", "")
                         response_dict["reasoning_content"] = None

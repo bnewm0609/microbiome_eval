@@ -67,6 +67,8 @@ Return just the json object in markdown format. Do not include any other text in
     @classmethod
     def parse_json_to_dict(cls, json_string: str) -> dict:
         # Remove markdown-style ```json``` markers if present
+        if isinstance(json_string, dict):
+            json_string = json_string["content"]
         json_cleaned = re.sub(r"^```json\s*|\s*```$", "", json_string.strip())
         return json.loads(json_cleaned)
         
@@ -154,6 +156,75 @@ Return just the json object in markdown format. Do not include any other text in
         return results_metrics, summary_metrics
 
 
+class HealthbenchProfessional(Healthbench):
+    
+    @staticmethod
+    def get_prompts(samples, src_filename) -> list[dict[str, Any]]:
+        """Similar to parent class, just has some minor differences in the data keys"""
+        prompts = []
+        for sample in samples:
+            system_prompt = "You are a helpful assistant."
+            prompt = sample["sample"]["conversation"]["messages"]
+            # remove some info that was used for filtering
+            sample_subset = {k: v for k, v in sample.items() if k not in ["_model", "_gen_kwargs", "_filter_response"]}
+            prompts.append({
+                "system_prompt": system_prompt,
+                "prompt": prompt,
+                "sample": sample["sample"],
+                "_src_filename": str(src_filename),
+                **sample_subset,
+            })
+        return prompts
+
+    @classmethod
+    def evaluate_responses(cls, results: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], dict[str, float]]:
+        from microbiome_eval.llm import LLM
+        grader_llm = LLM("google/gemma-4-31B-it")
+        grader_prompts = []
+        for result in results:
+            convo_with_response = result["sample"]["conversation"]["messages"] + [{"role": "assistant", "content": result["response"]}]
+            convo_str = "\n\n".join(
+                [f"{m['role']}: {m['content']}" for m in convo_with_response]
+            )
+            for rubric_item in result["sample"]["rubric_items"]:
+                rubric_item_str = f"[{rubric_item['points']}] {rubric_item['criterion_text']}"
+                grader_prompt = cls.GRADER_TEMPLATE.replace("<<conversation>>", convo_str).replace("<<rubric_item>>", rubric_item_str)
+                grader_prompts.append([{"role": "user", "content": grader_prompt}])
+        
+
+        grader_responses = grader_llm.batch_call(grader_prompts, validation_fn=cls.parse_json_to_dict, temperature=0.5, max_tokens=2048, max_workers=5)
+        results_metrics = []
+        grader_response_idx = 0
+        for result in results:
+            grader_responses_dicts = []
+            for rubric_item in result["sample"]["rubric_items"]:
+                grader_response = grader_responses[grader_response_idx]
+                grader_response_idx += 1
+                try:
+                    grader_json = cls.parse_json_to_dict(grader_response["content"])
+                except json.JSONDecodeError as e:
+                    print(f"JSON decoding failed: {e}")
+                    grader_json = {}
+                    grader_responses_dicts.append(grader_json)
+                    continue
+                grader_responses_dicts.append(grader_json)
+
+            if len(grader_responses_dicts) != len(result["sample"]["rubric_items"]):
+                print(f"Warning: number of grader responses ({len(grader_responses_dicts)}) does not match number of rubric items ({len(result['sample']['rubric_items'])}) for result with idx {result['_idx']}. This may be due to JSON parsing errors. Skipping score calculation for this result.")
+                overall_score = None
+            else:
+                overall_score = cls.calculate_score(result["sample"]["rubric_items"], grader_responses_dicts)
+            results_metrics.append(result | {
+                "grader_responses": grader_responses_dicts,
+                "score": overall_score,
+            })
+        
+        summary_metrics = {
+            "average_score": sum(r["score"] for r in results_metrics if r["score"] is not None) / len(results_metrics),
+            "n": len(results_metrics),
+        }
+        return results_metrics, summary_metrics
+
 
 class MedXpertQA:
 
@@ -239,6 +310,7 @@ Model response:
 
 DATASET_CLS_MAP = {
     "healthbench": Healthbench,
+    "healthbench_professional": HealthbenchProfessional,
     "MedXpertQA": MedXpertQA,
     
 }
