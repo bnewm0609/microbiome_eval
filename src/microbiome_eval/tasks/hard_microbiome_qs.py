@@ -308,11 +308,218 @@ Model response:
         return results_metrics, summary_metrics
 
 
+class BixBench:
+
+    @staticmethod
+    def get_prompts(samples, src_filename) -> list[dict[str, Any]]:
+        import random
+        prompts = []
+        for sample in samples:
+            system_prompt = "You are a helpful assistant."
+
+            question = sample["sample"]["question"]
+            ideal = sample["sample"]["ideal"]
+            distractors = sample["sample"]["distractors"]
+
+            choices = [ideal] + list(distractors)
+            rng = random.Random(sample["sample"]["id"])
+            rng.shuffle(choices)
+            correct_letter = chr(ord("A") + choices.index(ideal))
+
+            choices_str = "\n".join(f"{chr(ord('A') + i)}. {choice}" for i, choice in enumerate(choices))
+
+            prompt = f"""Answer the following multiple choice question:
+
+Question:
+{question}
+
+{choices_str}
+
+The final line of your answer should be a single letter corresponding to the correct answer choice, on its own line. For example, if the correct answer is choice A, your answer should end with a line that just says "A"."""
+
+            sample_subset = {k: v for k, v in sample.items() if k not in ["_model", "_gen_kwargs", "_filter_response"]}
+            prompts.append({
+                "system_prompt": system_prompt,
+                "prompt": prompt,
+                "sample": sample["sample"],
+                "correct_letter": correct_letter,
+                "_src_filename": str(src_filename),
+                **sample_subset,
+            })
+        return prompts
+
+    @staticmethod
+    def evaluate_responses(results: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], dict[str, float]]:
+        from microbiome_eval.llm import LLM
+        judge_llm = LLM("google/gemma-4-31B-it")
+
+        judge_prompt_template = """Given the following model response to a multiple choice question, extract the single letter corresponding to the model's final answer choice.
+Your response should be a single letter on its own line or the word "unknown" if you cannot determine the answer choice from the model's response.
+
+Model response:
+{response}""".strip()
+
+        judge_prompts = [
+            [{"role": "user", "content": judge_prompt_template.format(response=result["response"])}]
+            for result in results
+        ]
+        judge_responses = judge_llm.batch_call(judge_prompts, temperature=1.0, max_tokens=5, max_workers=5)
+
+        results_metrics = []
+        for result, judge_response in zip(results, judge_responses):
+            judge_content = judge_response["content"].strip()
+            pred_letter = judge_content[0].upper() if judge_content else None
+            correct_letter = result["correct_letter"]
+            results_metrics.append(result | {
+                "pred_letter": pred_letter,
+                "correct": pred_letter == correct_letter,
+            })
+
+        n = len(results_metrics)
+        n_correct = sum(r["correct"] for r in results_metrics)
+        summary_metrics = {
+            "accuracy": n_correct / n if n > 0 else 0.0,
+            "n": n,
+            "n_correct": n_correct,
+        }
+        return results_metrics, summary_metrics
+
+
+class Labbench2:
+
+    @staticmethod
+    def _build_prompt(sample: dict) -> str | list:
+        import base64
+        from microbiome_eval.tasks.labbench2_utils import (
+            download_question_files, download_sources, GCS_BUCKET,
+            is_text_injectable_format, get_media_type,
+        )
+
+        files_path = sample["files"]
+        sources = sample["sources"]
+        mode = sample.get("mode", {})
+        question = sample["question"]
+        prompt_suffix = sample.get("prompt_suffix", "").strip()
+
+        injected_text = ""
+        media_files = []
+
+        if files_path:
+            local_dir = download_question_files(GCS_BUCKET, files_path.strip("/"))
+            if local_dir.exists():
+                for f in sorted(local_dir.iterdir()):
+                    if not f.is_file():
+                        continue
+                    if is_text_injectable_format(f) or mode.get("inject", False):
+                        injected_text += f"\n--- {f.name} ---\n{f.read_text()}"
+                    else:
+                        media_files.append(f)
+        elif sources:
+            # for now, skip if there are not files.
+            continue
+            # content = download_sources(sources)
+            # if content:
+            #     injected_text = content
+
+        parts = []
+        if injected_text:
+            parts.append(injected_text.strip())
+        parts.append(question)
+        if prompt_suffix:
+            parts.append(prompt_suffix)
+        full_text = "\n\n".join(parts)
+
+        if not media_files:
+            return full_text
+
+        content_blocks = [{"type": "text", "text": full_text}]
+        for f in media_files:
+            media_type = get_media_type(f.suffix)
+            data_b64 = base64.b64encode(f.read_bytes()).decode()
+            if media_type.startswith("image/"):
+                content_blocks.append({
+                    "type": "image_url",
+                    "image_url": {"url": f"data:{media_type};base64,{data_b64}"},
+                })
+            elif media_type == "application/pdf":
+                content_blocks.append({
+                    "type": "file",
+                    "file": {"filename": f.name, "file_data": f"data:application/pdf;base64,{data_b64}"},
+                })
+        return [{"role": "user", "content": content_blocks}]
+
+    @staticmethod
+    def get_prompts(samples, src_filename) -> list[dict[str, Any]]:
+        prompts = []
+        for sample in samples:
+            prompt = Labbench2._build_prompt(sample["sample"])
+            sample_subset = {k: v for k, v in sample.items() if k not in ["_model", "_gen_kwargs", "_filter_response"]}
+            prompts.append({
+                "system_prompt": "You are a helpful assistant.",
+                "prompt": prompt,
+                "sample": sample["sample"],
+                "_src_filename": str(src_filename),
+                **sample_subset,
+            })
+        return prompts
+
+    @staticmethod
+    def evaluate_responses(results: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], dict[str, float]]:
+        from microbiome_eval.llm import LLM
+        from collections import defaultdict
+
+        judge_llm = LLM("google/gemma-4-31B-it")
+
+        judge_template = """You are evaluating whether a model's response correctly answers a short-answer question.
+
+Question: {question}
+Correct answer: {ideal}
+Model response: {response}
+
+Does the model's response contain the correct answer? Accept partial matches, different phrasings, and equivalent numeric representations (e.g. "2x10^6" == "2,000,000"). Respond with just "correct" or "incorrect"."""
+
+        judge_prompts = [
+            [{"role": "user", "content": judge_template.format(
+                question=r["sample"]["question"],
+                ideal=r["sample"]["ideal"],
+                response=r["response"],
+            )}]
+            for r in results
+        ]
+        judge_responses = judge_llm.batch_call(judge_prompts, temperature=0.0, max_tokens=10, max_workers=5)
+
+        results_metrics = []
+        for result, judge_response in zip(results, judge_responses):
+            correct = judge_response["content"].lower().strip().startswith("correct")
+            results_metrics.append(result | {"correct": correct})
+
+        by_tag: dict[str, list] = defaultdict(list)
+        for r in results_metrics:
+            by_tag[r["sample"]["tag"]].append(r)
+
+        n = len(results_metrics)
+        n_correct = sum(r["correct"] for r in results_metrics)
+        summary_metrics = {
+            "accuracy": n_correct / n if n > 0 else 0.0,
+            "n": n,
+            "n_correct": n_correct,
+            "by_tag": {
+                tag: {
+                    "accuracy": sum(r["correct"] for r in tag_results) / len(tag_results),
+                    "n": len(tag_results),
+                }
+                for tag, tag_results in sorted(by_tag.items())
+            },
+        }
+        return results_metrics, summary_metrics
+
+
 DATASET_CLS_MAP = {
     "healthbench": Healthbench,
     "healthbench_professional": HealthbenchProfessional,
     "MedXpertQA": MedXpertQA,
-    
+    "BixBench": BixBench,
+    "labbench2": Labbench2,
 }
 
 
