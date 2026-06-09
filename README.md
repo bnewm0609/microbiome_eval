@@ -24,6 +24,9 @@ uv run python scripts/submit_job.py vllm-proxy "uv run -- python scripts/launch_
 # launch the vllm servers:
 # E.g. gemma-4-31B-it on 2 gpus
 uv run python scripts/submit_job.py gemma-4-31B-it-2gpu "uv run -- python scripts/launch_vllm_server.py \"uv run -- vllm serve google/gemma-4-31B-it --data-parallel-size 2 --host 0.0.0.0 --api-key synthesis_rc --max-model-len 36032 --enable-auto-tool-choice --tool-call-parser gemma4 --reasoning-parser gemma4 --chat-template vllm_servers/tool_chat_templates/tool_chat_template_gemma4.jinja --enable-prefix-caching --log-error-stack --max-num-batched-tokens 2496\"" --ngpu 2 --partition gpu-a100 --time 24:00:00 --mem 128G
+
+# qwen
+uv run python scripts/submit_job.py Qwen/Qwen3.5-9B "uv run -- python scripts/launch_vllm_server.py \"uv run -- vllm serve Qwen/Qwen3.5-9B --data-parallel-size 2 --host 0.0.0.0 --api-key synthesis_rc --max-model-len 36032 --enable-auto-tool-choice --tool-call-parser qwen3_coder --reasoning-parser qwen3 --enable-prefix-caching --log-error-stack\"" --ngpu 2 --partition gpu-a100 --time 24:00:00 --mem 128G
 ```
 
 ### Run the evals

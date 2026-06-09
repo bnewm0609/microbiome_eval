@@ -17,5 +17,8 @@ def load_task(task_name):
     elif task_name == "hard_microbiome_qs":
         from microbiome_eval.tasks.hard_microbiome_qs import HardMicrobiomeQsTask
         return HardMicrobiomeQsTask
+    elif task_name == "methods_errors":
+        from microbiome_eval.tasks.methods_errors import MethodsErrors
+        return MethodsErrors
     else:
         raise ValueError(f"Unknown task name: {task_name}")
