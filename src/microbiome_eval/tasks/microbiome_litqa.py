@@ -519,7 +519,7 @@ class MicrobiomeLitQA_HighCitationQAGeneration(MicrobiomeLitQA_ResearchQAGenerat
             return qa_pairs
     
         prompt_template = """
-Given the following paper title and abstract in the field of microbiome research, identify the main takeaway(s) from the paper for clinicians. Rather than outputing the takeaways verbatim, frame them as questions whose answers are the takeaways. The questions should be framed as generatl questions that one scientist might ask another rather than focusing on the paper itself.
+Given the following paper title and abstract in the field of microbiome research, identify the main takeaway(s) from the paper for clinicians. Rather than outputing the takeaways verbatim, frame them as questions whose answers are the takeaways. The questions should be framed as general questions that one scientist might ask another rather than focusing on the paper itself.
 
 You should return the research questions in the following JSON format:
 [{{"question": "<insert question here>", "answer": "<insert answer here>"}}]

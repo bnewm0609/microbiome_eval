@@ -11,11 +11,11 @@ PROMPT_TEMPLATE = """The following is a claim from a scientific paper:
 
 {claim}
 
-The following methodology was used to support this claim:
+The following is a methodological description of a microbiome study. Your job is to identify any methodological flaws in the described approach. If there are no flaws, then respond with "No flaws".
 
 {incorrect_methodology}
 
-Please identify any errors in this methodology. If there are no errors, say "no errors"."""
+Please identify any methodological flaws in the described approach. If there are no flaws, then respond with "No flaws"."""
 
 JUDGE_TEMPLATE = """You are evaluating whether a model response correctly identifies a specific methodological error.
 
