@@ -81,7 +81,7 @@ def compress_config(config: dict, exclude: set = None) -> str:
 
 def main():
     parser = ArgumentParser()
-    parser.add_argument("--task", help="Name of the task to run", choices=["disease_classification", "microbiome_reasoning", "microbiome_litqa", "med_qa", "hard_microbiome_qs", "methods_errors"])
+    parser.add_argument("--task", help="Name of the task to run", choices=["disease_classification", "microbiome_reasoning", "microbiome_litqa", "med_qa", "hard_microbiome_qs", "methods_errors", "lit_review_reranking"], required=True)
     parser.add_argument("--model", help="Name of the model to evaluate")
     parser.add_argument("--generation_kwargs", help="Generation kwargs to use for the model calls, e.g. --generation_kwargs '{\"temperature\": 0.7, \"max_tokens\": 512}'", default=None)
     parser.add_argument("--start", type=int, default=0, help="Which example index to start running at (useful when parallelizing synthetic data generation",)
