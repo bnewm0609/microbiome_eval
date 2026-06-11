@@ -85,11 +85,12 @@ def main():
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
 
     VLLM_SERVERS_DIR.mkdir(parents=True, exist_ok=True)
+    pending_file = VLLM_SERVERS_DIR / f"pending-vllm-{model_safe}-{num_gpus}-{timestamp}.json"
     server_file = VLLM_SERVERS_DIR / f"vllm-{model_safe}-{num_gpus}-{timestamp}.json"
     with open(VLLM_SERVERS_DIR / ".port.lock", "w") as lock_fh:
         fcntl.flock(lock_fh, fcntl.LOCK_EX)
         port = get_open_port()
-        with open(server_file, "w") as fh:
+        with open(pending_file, "w") as fh:
             json.dump(
                 {"hostname": socket.gethostname(), "port": port, "model_name": model, "num_gpus": num_gpus},
                 fh,
@@ -106,6 +107,7 @@ def main():
     def cleanup(signum=None, frame=None):
         print("Cleaning up server in `clenaup` handler")
         server_file.unlink(missing_ok=True)
+        pending_file.unlink(missing_ok=True)
         if proc is not None:
             proc.terminate()
         sys.exit(0)
@@ -134,6 +136,7 @@ def main():
 
     streams = {proc.stdout: sys.stdout, proc.stderr: sys.stderr}
     open_streams = set(streams)
+    server_ready = False
     try:
         while open_streams:
             readable, _, _ = select.select(list(open_streams), [], [])
@@ -142,10 +145,15 @@ def main():
                 if line:
                     streams[stream].write(line)
                     streams[stream].flush()
+                    if not server_ready and "Application startup complete" in line:
+                        pending_file.rename(server_file)
+                        server_ready = True
+                        print(f"[vllm] Server ready, registered as {server_file.name}", flush=True)
                 else:
                     open_streams.discard(stream)
     finally:
         server_file.unlink(missing_ok=True)
+        pending_file.unlink(missing_ok=True)
 
     proc.wait()
     sys.exit(proc.returncode)

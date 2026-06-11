@@ -49,7 +49,7 @@ class Server:
 # Registry management
 # ---------------------------------------------------------------------------
 
-def scan_for_new_servers() -> None:
+async def scan_for_new_servers() -> None:
     known = {s.server_filename for servers in registry.values() for s in servers}
     for path in VLLM_SERVERS_DIR.glob("vllm-*.json"):
         if path.name in known:
@@ -65,6 +65,10 @@ def scan_for_new_servers() -> None:
             )
             registry.setdefault(server.model_name, []).append(server)
             print(f"[proxy] Registered {server.model_name} at {server.hostname}:{server.port}", flush=True)
+            resp = await http_client.get(f"http://{server.hostname}:{server.port}/health", timeout=10)
+            if resp.status_code == 503:
+                print(f"[proxy] Health check returned 503 for {server.hostname}:{server.port}, deregistering", flush=True)
+                deregister(server)
         except Exception as exc:
             print(f"[proxy] Skipping {path.name}: {exc}", flush=True)
 
@@ -146,7 +150,7 @@ async def proxy(path: str, request: Request) -> Response:
 async def lifespan(app: FastAPI):
     global http_client
     http_client = httpx.AsyncClient(trust_env=False)
-    scan_for_new_servers()
+    await scan_for_new_servers()
     poll_task = asyncio.create_task(_poll_loop())
     yield
     poll_task.cancel()
@@ -157,7 +161,7 @@ async def lifespan(app: FastAPI):
 async def _poll_loop() -> None:
     while True:
         await asyncio.sleep(POLL_INTERVAL)
-        scan_for_new_servers()
+        await scan_for_new_servers()
 
 
 app = FastAPI(lifespan=lifespan)
