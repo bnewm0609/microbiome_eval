@@ -6,7 +6,7 @@ from typing import Any
 
 from microbiome_eval.tasks.base import BaseTask, PROJ_PATH
 
-
+import pymupdf
 # helper functions for Healthbench evaluation
 
 
@@ -416,7 +416,7 @@ class Labbench2:
                         media_files.append(f)
         elif sources:
             # for now, skip if there are not files.
-            continue
+            return None
             # content = download_sources(sources)
             # if content:
             #     injected_text = content
@@ -435,17 +435,26 @@ class Labbench2:
         content_blocks = [{"type": "text", "text": full_text}]
         for f in media_files:
             media_type = get_media_type(f.suffix)
-            data_b64 = base64.b64encode(f.read_bytes()).decode()
             if media_type.startswith("image/"):
+                data_b64 = base64.b64encode(f.read_bytes()).decode()
                 content_blocks.append({
                     "type": "image_url",
                     "image_url": {"url": f"data:{media_type};base64,{data_b64}"},
                 })
             elif media_type == "application/pdf":
+                # convert pdf to png
+                doc = pymupdf.open(f)
+                page = doc.load_page(0)  # load the first page
+                pix = page.get_pixmap(dpi=150)  # render page to an image
+                data_b64 = base64.b64encode(pix.tobytes("png")).decode()
                 content_blocks.append({
-                    "type": "file",
-                    "file": {"filename": f.name, "file_data": f"data:application/pdf;base64,{data_b64}"},
+                    "type": "image_url",
+                    "image_url": {"url": f"data:image/png;base64,{data_b64}"},
                 })
+                # content_blocks.append({
+                #     "type": "file",
+                #     "file": {"filename": f.name, "file_data": f"data:application/pdf;base64,{data_b64}"},
+                # })
         return [{"role": "user", "content": content_blocks}]
 
     @staticmethod
@@ -453,6 +462,8 @@ class Labbench2:
         prompts = []
         for sample in samples:
             prompt = Labbench2._build_prompt(sample["sample"])
+            if prompt is None:
+                continue
             sample_subset = {k: v for k, v in sample.items() if k not in ["_model", "_gen_kwargs", "_filter_response"]}
             prompts.append({
                 "system_prompt": "You are a helpful assistant.",

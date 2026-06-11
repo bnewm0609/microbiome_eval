@@ -53,13 +53,12 @@ class MethodsErrors(BaseTask):
             for line in f:
                 item = json.loads(line)
                 prompts.append({
+                    "system_prompt": "You are a helpful assistant.",
                     "prompt": PROMPT_TEMPLATE.format(
                         claim=item["claim"],
                         incorrect_methodology=item["incorrect_methodology"],
                     ),
-                    "question_id": item["question_id"],
-                    "rubric": item["rubric"],
-                    "incorrect_methodology": item["incorrect_methodology"],
+                    **item,  # include question_id, rubric, and incorrect_methodology for later use in evaluation
                 })
         return prompts
 

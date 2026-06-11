@@ -17,6 +17,9 @@ dependencies = [
     "huggingface_hub",
     "openai>=2.37.0",
     "datasets>=4.8.5",
+    "pydantic-ai>=1.106.0",
+    "pymupdf>=1.27.2.3",
+    "tokenizers<=0.23.0",
 ]
 
 [tool.setuptools.packages.find]
