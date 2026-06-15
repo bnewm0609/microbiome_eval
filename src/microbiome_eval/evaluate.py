@@ -144,6 +144,8 @@ def main():
         responses = model.batch_call(messages_batched, max_workers=args.max_workers, **generation_kwargs)
         generations = []
         for prompt, messages, response in zip(prompts, messages_batched, responses):
+            if response is None:
+                response = {"content": "", "error": "Model call failed or returned no response."}
             generations.append({
                 "response": response["content"],
                 **prompt,

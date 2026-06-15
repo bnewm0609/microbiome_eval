@@ -16,7 +16,7 @@ def get_negatives(papers, method, num_negatives, relevant_corpus_ids, paper_info
         and p["year"] <= paper_info["year"]
         and p["corpusId"] != paper_info["corpusId"]
     ]
-    if method == "random":
+    if method == "rand":
         return random.sample(candidates, min(num_negatives, len(candidates)))
     if method == "hard_negatives":
         from sentence_transformers import SentenceTransformer, util
@@ -24,7 +24,7 @@ def get_negatives(papers, method, num_negatives, relevant_corpus_ids, paper_info
             return []
 
         def query_text(p):
-            question = p.get["question"]
+            question = p["question"]
             query_text = f"Identify which of papers are relevant to answer the following question: {question}"
             return query_text.strip()
 
@@ -34,7 +34,7 @@ def get_negatives(papers, method, num_negatives, relevant_corpus_ids, paper_info
             return f"Title: {title}\nAbstract: {abstract}".strip()
 
         model = SentenceTransformer("all-MiniLM-L6-v2")
-        query_emb = model.encode(paper_text(paper_info), convert_to_tensor=True)
+        query_emb = model.encode(query_text(paper_info), convert_to_tensor=True)
         candidate_embs = model.encode([paper_text(p) for p in candidates], convert_to_tensor=True)
 
         scores = util.cos_sim(query_emb, candidate_embs)[0]
@@ -59,9 +59,9 @@ class LitReviewReranking(BaseTask):
     @staticmethod
     def add_arguments(parser):
         # parser.add_argument("--split", default="dev", choices=["dev", "test"], help="Which split of the dataset to use.")
-        parser.add_argument("--num_abstracts", default=100)
-        parser.add_argument("--num_relevant", default=None, help="Number of relevant papers to include in the prompt (default: include all up to num_abstracts)")
-        parser.add_argument("--negative_selection_method", default="random", choices=["random", "hard_negatives"], help="Method for selecting negative papers to include in the prompt")
+        parser.add_argument("--num_abstracts", type=int, default=100)
+        parser.add_argument("--num_relevant", default=None, type=int, help="Number of relevant papers to include in the prompt (default: include all up to num_abstracts)")
+        parser.add_argument("--negative_selection_method", default="rand", choices=["rand", "hard_negatives"], help="Method for selecting negative papers to include in the prompt")
     
     def get_prompts(self):
         with open("data/gmrepo/papers/lit_retrieval/relevances.jsonl") as f:
@@ -70,6 +70,9 @@ class LitReviewReranking(BaseTask):
         with open("data/gmrepo/papers/lit_retrieval/papers.jsonl") as f:
             papers = [json.loads(line) for line in f]
             papers_by_corpus_id = {p["corpusId"]: p for p in papers}
+        
+        def format_paper_for_prompt(paper):
+            return f"CorpusId: {paper['corpusId']}\nTitle: {paper['title']}\nAbstract: {paper['abstract']}".strip() 
 
         
         prompt_template = """
@@ -104,20 +107,19 @@ Here are the papers:
             # format the papers for the prompt
             formatted_papers = "\n\n".join([format_paper_for_prompt(p) for p in prompt_papers])
 
-            prompt = prompt_template.format(
+            prompt_text = prompt_template.format(
                 question=sample_qa["question"],
                 papers=formatted_papers
             )
             prompts.append(sample_qa | {
                 "prompt": prompt_text,
-                "system_messsage": system_message,
+                "system_messsage": "You are a helpful assistant.",
                 "relevant_papers": relevant_papers,
                 "negatives": negatives,
             })
     
         # shuffle the dataset if seed is set
         if self.config["seed"] is not None:
-            import random
             random.seed(self.config["seed"])
             random.shuffle(prompts)
         
@@ -131,8 +133,8 @@ Here are the papers:
     
 
     def get_metrics(self, predicted_corpus_ids, relevant_papers):
-        true_ids = {int(ref) for ref in predicted_ids}
-        pred_ids = {rp["corpusId"] for rp in relevant_papers}
+        pred_ids = {int(ref) for ref in predicted_corpus_ids}
+        true_ids = {rp["corpusId"] for rp in relevant_papers}
 
         tp = len(true_ids.intersection(pred_ids))
         fp = len(pred_ids - true_ids)
@@ -163,7 +165,7 @@ Here are the papers:
                 predicted_corpus_ids = []
 
             predicted_corpus_ids = [int(cid) for cid in predicted_corpus_ids]
-            metrics = self.get_metrcics(predicted_corpus_ids, result["relevant_papers"])
+            metrics = self.get_metrics(predicted_corpus_ids, result["relevant_papers"])
             outputs.append(result | {
                 "metrics": metrics,
                 "predicted_corpus_ids": predicted_corpus_ids,
@@ -176,5 +178,4 @@ Here are the papers:
             "recall": sum(r["metrics"]["recall"] for r in outputs) / n if n > 0 else 0.0,
             "n": n,
         }
-        return results_metrics, summary_metrics
-            
+        return outputs, summary_metrics
