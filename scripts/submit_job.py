@@ -50,6 +50,7 @@ def submit_job(
     ncpu="4",
 ):
     additional_args = []
+    # additional_args = ["#SBATCH --exclude=g3082"]
     if "ckpt" in partition:
         partition, gpu = partition.split("-", 1)
         partition="ckpt-all"

@@ -5,7 +5,8 @@ from pathlib import Path
 from microbiome_eval.tasks.base import BaseTask, PROJ_PATH
 
 
-DATA_PATH = PROJ_PATH / "data/cMDA/methodology_qs_hand_shaped/qs.jsonl"
+# DATA_PATH = PROJ_PATH / "data/cMDA/methodology_qs_hand_shaped/qs.jsonl"
+DATA_PATH = PROJ_PATH / "data/cMDA/methodology_qs_hand_shaped/qs_v2.jsonl"
 
 PROMPT_TEMPLATE = """The following is a claim from a scientific paper:
 

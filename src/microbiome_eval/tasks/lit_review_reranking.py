@@ -164,7 +164,13 @@ Here are the papers:
             except json.JSONDecodeError:
                 predicted_corpus_ids = []
 
-            predicted_corpus_ids = [int(cid) for cid in predicted_corpus_ids]
+            pids = []
+            for cid in predicted_corpus_ids:
+                try:
+                    pids.append(int(cid))
+                except ValueError:
+                    pass
+            predicted_corpus_ids = pids
             metrics = self.get_metrics(predicted_corpus_ids, result["relevant_papers"])
             outputs.append(result | {
                 "metrics": metrics,

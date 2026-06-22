@@ -38,22 +38,26 @@ set -x
 # uv run python scripts/submit_job.py gemma-4-31B-it "uv run -- python scripts/launch_vllm_server.py \"uv run -- vllm serve google/gemma-4-31B-it --data-parallel-size 2 --host 0.0.0.0 --api-key synthesis_rc --max-model-len 36032 --enable-auto-tool-choice --tool-call-parser gemma4 --reasoning-parser gemma4 --chat-template vllm_servers/tool_chat_templates/tool_chat_template_gemma4.jinja --enable-prefix-caching --log-error-stack --max-num-batched-tokens 2496\"" --ngpu 2 --partition gpu-a100 --time 24:00:00 --mem 128G
 
 # run the evals:
-models=(
-    # "google/medgemma-1.5-4b-it"
-    "Qwen/Qwen3.5-9B"
-    # "google/gemma-4-31B-it"
-)
-gen_kwargs=(
-    #'{"temperature": 0.0}'
-    '{"temperature": 1.0, "top_p": 0.95, "top_k": 20, "min_p": 0.0, "presence_penalty": 1.5, "repetition_penalty": 1.0, "chat_template_kwargs": {"enable_thinking": true}}'
-    #'{"temperature": 1.0, "top_p": 0.95, "top_k": 64, "chat_template_kwargs": {"enable_thinking": true}}'
-)
-out_dir="results/2_hard_microbiome_qs_v1/"
-data_config='{"healthbench": "001", "healthbench_professional": "001", "MedXpertQA": "001"}'
+# models=(
+#     # "google/medgemma-1.5-4b-it"
+#     "Qwen/Qwen3.5-9B"
+#     # "google/gemma-4-31B-it"
+# )
+# gen_kwargs=(
+#     #'{"temperature": 0.0}'
+#     '{"temperature": 1.0, "top_p": 0.95, "top_k": 20, "min_p": 0.0, "presence_penalty": 1.5, "repetition_penalty": 1.0, "chat_template_kwargs": {"enable_thinking": true}}'
+#     #'{"temperature": 1.0, "top_p": 0.95, "top_k": 64, "chat_template_kwargs": {"enable_thinking": true}}'
+# )
+# out_dir="results/2_hard_microbiome_qs_v1/"
+# data_config='{"healthbench": "001", "healthbench_professional": "001", "MedXpertQA": "001"}'
 
-for i in "${!models[@]}"; do
-    model="${models[$i]}"
-    gen_kwargs="${gen_kwargs[$i]}"
+# for i in "${!models[@]}"; do
+#     model="${models[$i]}"
+#     gen_kwargs="${gen_kwargs[$i]}"
     
-    uv run -- python scripts/submit_job.py "$model-2_hard_microbiome_qs_v1" "uv run -- python src/microbiome_eval/evaluate.py --model \"$model\" --generation_kwargs '$gen_kwargs' --seed 31 --limit 500 --out_dir \"$out_dir\" --max_workers 20 --task hard_microbiome_qs --data_config '$data_config'" --ngpu 0 --partition gpu-a100 --time 24:00:00 --mem 64G
-done
+#     uv run -- python scripts/submit_job.py "$model-2_hard_microbiome_qs_v1" "uv run -- python src/microbiome_eval/evaluate.py --model \"$model\" --generation_kwargs '$gen_kwargs' --seed 31 --limit 500 --out_dir \"$out_dir\" --max_workers 20 --task hard_microbiome_qs --data_config '$data_config'" --ngpu 0 --partition gpu-a100 --time 24:00:00 --mem 64G
+# done
+
+# gen_kwargs='{"temperature": 1.0, "top_p": 0.95, "top_k": 64, "chat_template_kwargs": {"enable_thinking": true}}'
+
+# uv run -- python scripts/submit_job.py "gemma_method_errors_v2" "uv run -- python src/microbiome_eval/evaluate.py --model google/gemma-4-31B-it --generation_kwargs '$gen_kwargs' --task methods_errors --seed 32 --limit 500 --out_dir results/debugging_methods_errors/ --max_workers 20" --ngpu 0 --partition gpu-a100 --time 24:00:00 --mem 64G --out_dir results/debugging_methods_errors/
