@@ -156,6 +156,7 @@ def main():
         pending_file.unlink(missing_ok=True)
 
     proc.wait()
+    print(f"vllm proc ended with returncode: {proc.returncode}")
     sys.exit(proc.returncode)
 
 
