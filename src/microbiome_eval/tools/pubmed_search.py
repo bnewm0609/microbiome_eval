@@ -4,9 +4,13 @@
 # the best practices are well defined
 from Bio import Entrez, Medline
 from io import StringIO
+import hashlib
+import json
 import os
 import re
+import sqlite3
 import time
+from pathlib import Path
 from urllib.error import HTTPError, URLError
 import threading
 
@@ -17,6 +21,57 @@ load_dotenv()
 
 # Tool name constant
 TOOL_NAME = "PubMed_Search_Tool"
+
+
+class PubMedSearchCache:
+    """Thread-safe persistent cache for journal searches, keyed on (keywords, journal)."""
+
+    def __init__(self, cache_dir):
+        self.cache_dir = Path(cache_dir)
+        self.cache_dir.mkdir(parents=True, exist_ok=True)
+        self.db_path = self.cache_dir / "pubmed_search_cache.db"
+        self.lock = threading.Lock()
+        self._init_db()
+
+    def _init_db(self):
+        conn = sqlite3.connect(str(self.db_path), check_same_thread=False)
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS cache (
+                key TEXT PRIMARY KEY,
+                keywords TEXT NOT NULL,
+                journal TEXT,
+                result TEXT NOT NULL,
+                timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+        conn.commit()
+        conn.close()
+
+    def _generate_key(self, keywords, journal):
+        key_string = json.dumps({"keywords": keywords, "journal": journal}, sort_keys=True)
+        return hashlib.sha256(key_string.encode()).hexdigest()
+
+    def get(self, keywords, journal):
+        key = self._generate_key(keywords, journal)
+        with self.lock:
+            conn = sqlite3.connect(str(self.db_path), check_same_thread=False)
+            cursor = conn.execute("SELECT result FROM cache WHERE key = ?", (key,))
+            row = cursor.fetchone()
+            conn.close()
+        return json.loads(row[0]) if row else None
+
+    def set(self, keywords, journal, result):
+        key = self._generate_key(keywords, journal)
+        with self.lock:
+            conn = sqlite3.connect(str(self.db_path), check_same_thread=False)
+            conn.execute(
+                "INSERT OR REPLACE INTO cache (key, keywords, journal, result) VALUES (?, ?, ?, ?)",
+                (key, keywords, journal, json.dumps(result)),
+            )
+            conn.commit()
+            conn.close()
 
 # Limit concurrent Entrez requests to avoid "Too many open files"
 # urllib opens a new connection for each request, so limit concurrency strictly.
@@ -141,6 +196,8 @@ class PubMed_Search_Tool(Tool):
 
         self.entrez_api_key = os.getenv("NCBI_API_KEY") # API Key for E-utils
 
+        self.cache = PubMedSearchCache(cache_dir=str(Path(__file__).parent.parent.parent.parent / ".pubmed_cache"))
+
     def _ensure_engine(self):
         """Lazy initialization of LLM engine."""
         pass
@@ -174,6 +231,9 @@ class PubMed_Search_Tool(Tool):
 
     def _search_single_journal(self, keywords, journal, max_results):
         """Search for publications in a single journal"""
+        cached = self.cache.get(keywords, journal)
+        if cached is not None:
+            return cached
         try:
             # Set the Entrez account
             Entrez.email = self.entrez_email
@@ -214,11 +274,13 @@ class PubMed_Search_Tool(Tool):
                 search_keywords = retry_keywords
 
             if not id_list:
-                return {
+                result = {
                     "term_used": search_keywords,
                     "summary": f"No publications found. Please try again with different keywords or journal.",
                     "citations": []
                 }
+                self.cache.set(keywords, journal, result)
+                return result
 
             def _do_efetch():
                 with ENTREZ_SEMAPHORE:
@@ -287,11 +349,13 @@ class PubMed_Search_Tool(Tool):
             #     "summary": summary,
             #     "citations": citations
             # }
-            return {
+            result = {
                 "term_used": search_keywords,
                 "publications": publications,
                 "citations": citations
             }
+            self.cache.set(keywords, journal, result)
+            return result
 
         except Exception as e:
             return {
