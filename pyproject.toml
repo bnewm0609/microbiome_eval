@@ -20,6 +20,7 @@ dependencies = [
     "pydantic-ai>=1.106.0",
     "pymupdf>=1.27.2.3",
     "tokenizers<=0.23.0",
+    "biopython>=1.87",
 ]
 
 [tool.setuptools.packages.find]

@@ -1,7 +1,9 @@
 # derived from https://github.com/lupantech/Eubiota/blob/main/scientist/tools/pubmed_search/tool.py
+import ssl
+import urllib.request
+# Create unverified context and patch it globally to avoid ssl errors with the Entrez API call
+ssl._create_default_https_context = ssl._create_unverified_context
 
-# this is the the after merging version of PubMed Search Tool
-# the best practices are well defined
 from Bio import Entrez, Medline
 from io import StringIO
 import os
@@ -135,7 +137,7 @@ class PubMed_Search_Tool(Tool):
         self._llm_engine = None
 
         self.max_results = 20
-        self.entrez_email = "test@gmail.com" # NOTE: Use Bingxuan's Free account email for now. TODO: Upgrade to a subscription email
+        self.entrez_email = "blnewman@cs.washington.edu" #"test@gmail.com" # NOTE: Use Bingxuan's Free account email for now. TODO: Upgrade to a subscription email
         self.entrez_tool = "PubMedQueryTool"
         self.max_journals = 10 # Maximum number of journals to search
 
@@ -398,11 +400,12 @@ if __name__ == "__main__":
     Test the PubMed Search Tool:
     python scientist/tools/pubmed_search/tool.py
     """
-    from scientist.tools.base_tool import Tool
+    # from scientist.tools.base_tool import Tool
     import os
     import time
-    from scientist.tools.utilis import print_json, save_result
-    from scientist.engine.factory import create_llm_engine
+    import json
+    # from scientist.tools.utilis import print_json, save_result
+    # from scientist.engine.factory import create_llm_engine
 
     model_string = "gpt-4o"
 
@@ -432,11 +435,12 @@ if __name__ == "__main__":
         start_time = time.time()
         result = tool.run(**example)
         print(f"Time taken: {round(time.time() - start_time, 2)} seconds")
-        print_json(result)
+        # print_json(result)
+        print(json.dumps(result, indent=2))
 
         # save the result to a json file
         output_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "test_logs")
-        save_result(result, example['query'], output_dir)
+        # save_result(result, example['query'], output_dir)
         print("")
 
     print("Done!")

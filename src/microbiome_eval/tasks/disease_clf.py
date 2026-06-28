@@ -110,4 +110,205 @@ Gold label set:
         }
         return instance_metrics, summary_metrics
 
+
+from pathlib import Path
+
+class DiseaseClassification_Generation:
+
+    @staticmethod
+    def add_arguments(parser):
+        parser.add_argument("--limit", default=None, help="count")
+        parser.add_argument("--start", default=0, help="start idx")
+        parser.add_argument("--model", help="Which model to use for all steps")
+        parser.add_argument("--generation_kwargs", help="model generation kwargs")
+        parser.add_argument("--steps", type=str, default="qa,distractors,quality_filter_surface_form", help="Comma-separated list of steps to run.")
+        # parser.add_argument("--start_step", default="qa", choices=["qa", "distractors", "quality_filter_surface_form"], help="Step to start running from. Defaults to the first step.")
+        # parser.add_argument("--end_step", default="all", choices=["qa", "distractors", "quality_filter_surface_form", "all"], help="Run up to and including this step. By default, runs all steps.")
+        parser.add_argument("--input_file", help="Path to a jsonl file to use as input to --start_step. Defaults to the paper info file for the first step.")
+        parser.add_argument("--seed", type=int, default=42, help="Random seed.")
+        parser.add_argument("--out_dir", help="Output file")
+
+
+    def run(self, args):
+        random.seed(args.seed)
+        llm = LLM(args.model)
+        generation_kwargs = json.loads(args.generation_kwargs) if args.generation_kwargs else {}
+        out_dir = Path(args.out_dir)
+        cache_dir = out_dir / "cache/"
+        cache_dir.mkdir(parents=True, exist_ok=True)
+
+        with open(out_dir / "config.json", "w") as f:
+            json.dump(vars(args), f)
+
+        if args.input_file:
+            with open(args.input_file, "r") as f:
+                step_inputs = [json.loads(line) for line in f]
+        else:
+            with open("data/gmrepo/papers/s2_paper_info.jsonl", "r") as f:
+                step_inputs = [json.loads(line) for line in f]# [:10]
+
+        steps = []
+        for step_label in args.steps.split(","):
+            if step_label not in self.steps:
+                raise ValueError(f"Invalid step '{step_label}' specified. Must be one of: {list(self.steps.keys())}")
+            steps.append((step_label, self.steps[step_label]))
+
+        # start_idx = next(i for i, (s, _) in enumerate(steps) if s == args.start_step)
+
+        start = int(args.start)
+        limit = int(args.limit) if args.limit is not None else len(step_inputs)
+
+        force_rerun = False
+        for step_i, (step, step_fn) in enumerate(steps):
+
+            step_inputs = step_inputs[start: start + limit]
+            print(f"Running step {step_i + 1}/{len(steps)}: {step}")
+
+            cache_path = cache_dir / f"{step}.jsonl"
+            if force_rerun and cache_path.exists():
+                cache_path.unlink()
+            cache_existed = cache_path.exists()
+
+            step_results = step_fn(
+                step_inputs,
+                llm,
+                cache_path,
+                generation_kwargs
+            )
+
+            if not cache_existed:
+                force_rerun = True
+
+            print(f'Step results at: {cache_path}')
+            # if step == args.end_step:
+            #     print(f"Reached specified end step {args.end_step}. Stopping.")
+            #     break
+            step_inputs = step_results
         
+
+class DiseaseClassification_GenerationV1(DiseaseClassification_Generation):
+
+    def __init__(self):
+        self.steps = {
+            "gen_pathways": self.gen_pathways,
+            "gen_trace": self.gen_trace,
+        }
+
+    def gen_pathways(self, qa_pairs, llm, cache_path, generation_kwargs):
+        prompt_template = """
+Based on the following scientific paper abstracts, what are some pathways or mechanisms influencing the effect of the bacteria {bacteria_name} on the disease {disease_name}? Please provide a concise summary of the key findings and mechanisms discussed in the abstracts. If no relevant information is found, please state "No relevant information found."
+
+{abstracts}
+""".strip()
+        
+        search_query_template = "{disease_name} AND {bacteria_name} AND microbiome"
+
+        from microbiome_eval.tools.pubmed_search import PubMed_Search_Tool
+        search_tool = PubMed_Search_Tool()
+
+        def format_publications(result):
+            formatted_publications = ""
+            for i, pub in enumerate(result['All Journals']['publications']):
+                text = f"""
+            Publication Abstract ([{i+1}] PMID: {pub['PMID']}):
+            Title: {pub['Title']}
+            {pub['Abstract']}
+            """
+                formatted_publications += text
+            return formatted_publications
+
+        valid_idxs = []
+        for sample in qa_pairs:
+            if sample["gold_label_set"]:
+                disease_name = sample["gold_label_set"][0]
+            else:
+                continue
+
+            cache_filename = cache_path.with_name(f"{cache_path.stem}_step_{sample['Index']}.jsonl")
+            if cache_filename.exists():
+                continue
+
+            # start with genus
+            search_results = []
+            for bacteria in sample["taxonomic_profile_genus"]:
+                if bacteria["scientific_name"] == "Unknown":
+                    continue
+                # search
+                query = search_query_template.format(disease_name=disease_name, bacteria_name=bacteria["scientific_name"])
+                result = search_tool.run(query=query)
+                if result['All Journals']['citations']:  # citations is always there
+                    search_results.append((bacteria["scientific_name"], result))
+            
+            # We didn't find any relevant papers for this disease
+            if not search_results:
+                continue
+
+            valid_idxs.append(sample["Index"])
+            # generate pathways (batched)
+            prompts = []
+            for bacteria_name, papers in search_results:
+                prompts.append([{
+                    "role": "user",
+                    "content": prompt_template.format(
+                        bacteria_name=bacteria_name,
+                        disease_name=disease_name,
+                        abstracts=format_publications(papers)
+                    )
+                }])
+            
+            responses = llm.batch_call(prompts, **generation_kwargs)
+
+            # cache intermediate results?
+            cache_filename = cache_path.with_name(f"{cache_path.stem}_step_{sample['Index']}.json")
+            with open(cache_filename, "w") as f:
+                f.write(json.dumps({
+                    bacteria_name: {"description": response["content"], "search_results": papers}
+                    for (bacteria_name, papers), response in zip(
+                        search_results,
+                        responses
+                    )
+                }))
+
+
+        # finally, write the info in the valid index files to the cache path
+        with open(cache_path, "w") as f:
+            for sample in qa_pairs:
+                if sample["Index"] in valid_idxs:
+                    cache_filename = cache_path.with_name(f"{cache_path.stem}_step_{sample['Index']}.json")
+                    with open(cache_filename, "r") as cf:
+                        step_results = json.load(cf)
+                    f.write(json.dumps(sample | {"step_results": step_results}) + "\n")
+
+
+    def gen_trace(self, qa_pairs, llm, cache_path, generation_kwargs):
+        # create prompts
+
+        # do other stuff
+        pass
+        
+
+
+    def run(self, args):
+        super().run(args)
+
+    
+
+if __name__ == "__main__":
+    import argparse
+
+    pipelines = {
+        "disease_classification_generation_v1": DiseaseClassification_GenerationV1,
+    }
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--pipeline", required=True, choices=pipelines.keys())
+    args, _ = parser.parse_known_args()
+
+    pipeline_cls = pipelines[args.pipeline]
+    if pipeline_cls is None:
+        raise NotImplementedError(f"Pipeline '{args.pipeline}' is not implemented yet.")
+
+    pipeline_cls.add_arguments(parser)
+    args = parser.parse_args()
+
+    pipeline_cls().run(args)
