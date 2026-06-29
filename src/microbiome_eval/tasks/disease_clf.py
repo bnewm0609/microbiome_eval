@@ -224,9 +224,13 @@ Based on the following scientific paper abstracts, what are some pathways or mec
             else:
                 continue
 
-            cache_filename = cache_path.with_name(f"{cache_path.stem}_step_{sample['Index']}.jsonl")
+            cache_filename = cache_path.with_name(f"{cache_path.stem}_step_{sample['Index']}.json")
             if cache_filename.exists():
+                valid_idxs.append(sample["Index"])
+                print(f"Found cached example: {sample['Index']}")
                 continue
+            # else:
+            #     print(f"Didn't find file: {cache_filename}")
 
             # start with genus
             search_results = []
