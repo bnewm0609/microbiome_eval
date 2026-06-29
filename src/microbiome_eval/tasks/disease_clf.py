@@ -230,8 +230,8 @@ Based on the following scientific paper abstracts, what are some pathways or mec
 
             # start with genus
             search_results = []
-            for bacteria in sample["taxonomic_profile_genus"]:
-                if bacteria["scientific_name"] == "Unknown":
+            for bacteria in sample.get("taxonomic_profile_genus", []):
+                if bacteria.get("scientific_name", "Unknown") == "Unknown":
                     continue
                 # search
                 query = search_query_template.format(disease_name=disease_name, bacteria_name=bacteria["scientific_name"])
@@ -271,21 +271,73 @@ Based on the following scientific paper abstracts, what are some pathways or mec
 
 
         # finally, write the info in the valid index files to the cache path
+        outputs = []
         with open(cache_path, "w") as f:
             for sample in qa_pairs:
                 if sample["Index"] in valid_idxs:
                     cache_filename = cache_path.with_name(f"{cache_path.stem}_step_{sample['Index']}.json")
                     with open(cache_filename, "r") as cf:
                         step_results = json.load(cf)
-                    f.write(json.dumps(sample | {"step_results": step_results}) + "\n")
+                    outputs.append(sample | {"pathways": step_results})
+                    f.write(json.dumps(sample | {"pathways": step_results}) + "\n")
+        return outputs
 
 
     def gen_trace(self, qa_pairs, llm, cache_path, generation_kwargs):
         # create prompts
+        prompt_template = """
+A sample of the microbiome was taken from a patient with the disease {disease_name}, and the following bacteria were identified in the sample:
 
-        # do other stuff
-        pass
-        
+{abundance_table}
+
+---
+Using the mechanism descriptions below, simulate a reasoning process that starts with the the bacterial profile and ends up concluding what disease the patient has.
+Your response should include a step-by-step reasoning trace, highlighting potential interactions between bacteria and their mechanisms. The relevant pathways for each of the bacteria types are highlighted below:
+
+{pathways}
+---
+
+Using the bacteria profile and the pathway descriptions, simulating a reasoning process that starts with the profile and ends with concluding what disease the patient has ({disease_name}). This should be formatted as a step-by-step reasoning trace.
+Do NOT include any citations to papers or explicitly mention the pathway descriptions in your answer.
+""".strip()
+
+        prompts = []
+        for sample in qa_pairs:
+            # form the abundance table
+            abundance_table_str = "\n".join([
+                f'{bact["scientific_name"]}: {bact["relative_abundance"]:.3f}%'
+                for bact in sample["taxonomic_profile_genus"]
+            ])
+
+            formatted_pathways = ""
+            for bacteria in sample["taxonomic_profile_genus"]:
+                pathway_descr = sample["pathways"].get(bacteria["scientific_name"])
+                if pathway_descr is None:
+                    continue
+                formatted_pathways += f"\n## Pathways for {bacteria}:\n{pathway_descr}\n"
+            formatted_pathways = formatted_pathways.strip()
+
+            prompts.append([{
+                "role": "user",
+                "content": prompt_template.format(
+                    disease_name=sample["gold_label_set"][0],
+                    abundance_table=abundance_table_str,
+                    pathways=formatted_pathways,
+                )
+            }])
+
+        # generate the traces
+        generation_kwargs["chat_template_kwargs"] = {"enable_thinking": False}
+        responses = llm.batch_call(prompts, **generation_kwargs)
+        outputs = []
+        for sample, response in zip(qa_pairs, responses):
+            outputs.append(sample | {"trace": response['content']})
+
+        with open(cache_path, "w") as f:
+            for output in outputs:
+                f.write(json.dumps(output) + "\n")
+
+        return outputs
 
 
     def run(self, args):
